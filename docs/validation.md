@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-10 (Asia/Bangkok)
 **Scope:** NPN voltage-divider DC operating point; pure math, real Flask HTTP routes, inline SVG UI, and repository CI.
-**Status:** Python, HTTP, and Windows Chrome browser QA verified. The GitHub-hosted Actions status must be recorded **after the actual push**, not inferred from local tests.
+**Status:** Python, HTTP, and Windows Chrome browser QA verified. The initial GitHub push was verified against `refs/heads/main`. GitHub Actions **run outcome remains unverified** because the private repository's Actions page was not accessible to the reviewing session.
 
 ## 1. Independent default reference
 
@@ -60,7 +60,7 @@ python -m unittest discover -s tests -v
 |---|---|---|---|
 | Local development / Python 3.12 | 2026-11-10 | **18 tests PASS** | DC math, saturation boundary, reset fallback, validation, Flask HTML/JSON, UI binding contracts |
 | Authorized Windows / Python 3.12 / isolated virtual environment | 2026-11-10 | **18 tests PASS** after final physics review and file transfer | Model/web suite, including both new regression cases |
-| GitHub Actions / Python 3.12 | Pending first push | **Not yet verified** | Same unittest command |
+| GitHub Actions / Python 3.12 | 2026-11-10; workflow included in initial push | **Run outcome not verified** (private access required) | Same unittest command |
 
 No test should be recorded as CI-passed until a real workflow run completes successfully.
 
@@ -96,4 +96,6 @@ python -m venv .venv
 
 Only the handout's twelve named files plus the one owner-approved GitHub Actions workflow may be tracked. Review `git diff --cached --name-only` and `git status --short`; never stage `.venv`, Python caches, temporary browser tests or screenshots.
 
-**Final push / Actions receipt:** To be filled after verifying the actual GitHub commit and CI run.
+**GitHub push receipt:** `git ls-remote origin refs/heads/main` returned `2ba86d899d69af19b00a5ecd38b341d4b8bccf02` for `main` on 2026-11-10. The first commit includes exactly the twelve handout paths and the one approved Actions workflow.
+
+**GitHub Actions receipt:** The workflow is present and configured for `push` and `pull_request`, but a completed job and its conclusion have **not** been observed. Open the private repository's **Actions** tab while signed in as an authorized owner/collaborator and record the workflow run ID, conclusion, and link before describing CI as passed.
