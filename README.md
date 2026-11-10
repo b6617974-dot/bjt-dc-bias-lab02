@@ -29,37 +29,37 @@ The page calculates a default operating point immediately. Editing any input upd
 | β | Fixed current gain | dimensionless | 100 |
 | VBE | Assumed base-emitter voltage | V | 0.70 |
 
-The Python calculation engine accepts resistance in **Ω** and current in **A**. The Flask layer converts the four kΩ inputs to Ω once and formats the result for display. It reports \(V_B,V_E,V_C,V_{CE},I_B,I_C,I_E,V_{TH},R_{TH}\).
+The Python calculation engine accepts resistance in **Ω** and current in **A**. The Flask layer converts the four kΩ inputs to Ω once and formats the result for display. It reports $V_B,V_E,V_C,V_{CE},I_B,I_C,I_E,V_{TH},R_{TH}$.
 
 ## 3. Method and engineering limits
 
 The divider is replaced by its Thévenin equivalent:
 
-\[
+$$
 V_{TH}=\frac{V_{CC}R_2}{R_1+R_2},\qquad
 R_{TH}=\frac{R_1R_2}{R_1+R_2}
-\]
+$$
 
 In forward-active operation:
 
-\[
+$$
 I_B=\frac{V_{TH}-V_{BE}}{R_{TH}+(\beta+1)R_E},\quad
 I_C=\beta I_B,\quad I_E=(\beta+1)I_B
-\]
+$$
 
-\[
+$$
 V_E=I_ER_E,\qquad V_B=V_E+V_{BE},\qquad
 V_C=V_{CC}-I_CR_C,\qquad V_{CE}=V_C-V_E
-\]
+$$
 
 The program distinguishes:
 
 - **Forward active:** a consistent operating point under fixed-β, fixed-VBE assumptions.
 - **Cutoff estimate:** zero transistor current and negligible leakage when the divider cannot forward-bias the base.
-- **Saturation estimate:** a bounded approximate solution using \(V_{CE(sat)}=0.20\,V\) and the supplied VBE. The base-collector junction must also be forward-biased (`VB > VC`); otherwise the program declines to report a saturation Q-point.
+- **Saturation estimate:** a bounded approximate solution using $V_{CE(sat)}=0.20\,V$ and the supplied VBE. The base-collector junction must also be forward-biased ($V_B > V_C$); otherwise the program declines to report a saturation Q-point.
 - **Outside model:** no consistent Q-point can be asserted within those approximations.
 
-Automatic checks evaluate transistor KCL, divider KCL, collector/emitter resistor drops, \(V_{CE}=V_C-V_E\), and region consistency. A **PASS** verifies the internal equations, **not** actual transistor behavior. This is **not SPICE**, a measured circuit, an AC amplifier model or a device-curve analysis.
+Automatic checks evaluate transistor KCL, divider KCL, collector/emitter resistor drops, $V_{CE}=V_C-V_E$, and region consistency. A **PASS** verifies the internal equations, **not** actual transistor behavior. This is **not SPICE**, a measured circuit, an AC amplifier model or a device-curve analysis.
 
 Inputs must be finite and physically positive; intentionally broad numeric software bounds prevent invalid or unreasonable computations but are **not component ratings**.
 
