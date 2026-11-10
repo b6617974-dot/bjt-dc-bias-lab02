@@ -1,0 +1,29 @@
+ENG29 2121 - Lab 02 Automated Test Log
+Date: 2026-11-10 (Asia/Bangkok)
+Environment: Windows / Python 3.12 / isolated virtual environment
+Command: python -m unittest discover -s tests -v
+
+test_cutoff_estimate_has_zero_transistor_current (test_dc_bias.BiasModelTests.test_cutoff_estimate_has_zero_transistor_current) ... ok
+test_reference_forward_active (test_dc_bias.BiasModelTests.test_reference_forward_active) ... ok
+test_reject_invalid_physical_or_nonfinite_inputs (test_dc_bias.BiasModelTests.test_reject_invalid_physical_or_nonfinite_inputs) ... ok
+test_saturation_estimate_respects_forced_beta (test_dc_bias.BiasModelTests.test_saturation_estimate_respects_forced_beta) ... ok
+test_saturation_requires_base_collector_forward_bias (test_dc_bias.BiasModelTests.test_saturation_requires_base_collector_forward_bias) ... ok
+test_self_checks_cover_transistor_and_divider_kcl (test_dc_bias.BiasModelTests.test_self_checks_cover_transistor_and_divider_kcl) ... ok
+test_cutoff_and_saturation_warnings_present_in_both_modes (test_web.FlaskRouteTests.test_cutoff_and_saturation_warnings_present_in_both_modes) ... ok
+test_english_interface_declares_matching_document_language (test_web.FlaskRouteTests.test_english_interface_declares_matching_document_language) ... ok
+test_get_root_renders_real_default_result (test_web.FlaskRouteTests.test_get_root_renders_real_default_result) ... ok
+test_html_and_json_share_all_backend_display_values (test_web.FlaskRouteTests.test_html_and_json_share_all_backend_display_values) ... ok
+test_invalid_input_shows_inline_error_and_api_4xx (test_web.FlaskRouteTests.test_invalid_input_shows_inline_error_and_api_4xx) ... ok
+test_json_endpoint_returns_independent_reference_value (test_web.FlaskRouteTests.test_json_endpoint_returns_independent_reference_value) ... ok
+test_malformed_json_payload_returns_400 (test_web.FlaskRouteTests.test_malformed_json_payload_returns_400) ... ok
+test_outside_model_does_not_publish_false_q_point (test_web.FlaskRouteTests.test_outside_model_does_not_publish_false_q_point) ... ok
+test_post_form_recalculates_when_resistance_changes (test_web.FlaskRouteTests.test_post_form_recalculates_when_resistance_changes) ... ok
+test_reset_returns_to_defaults_without_javascript (test_web.FlaskRouteTests.test_reset_returns_to_defaults_without_javascript) ... ok
+test_schematic_and_cards_share_backend_data_bindings (test_web.FlaskRouteTests.test_schematic_and_cards_share_backend_data_bindings) ... ok
+test_schematic_uses_no_external_script_or_raster_diagram (test_web.FlaskRouteTests.test_schematic_uses_no_external_script_or_raster_diagram) ... ok
+
+----------------------------------------------------------------------
+Ran 18 tests in 0.175s
+
+OK
+WINDOWS_TEST_SUITE_EXIT=0
