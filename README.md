@@ -92,3 +92,7 @@ A successful response contains `ok`, `region`, `model`, raw SI-unit `results`, h
 Only the handout's named files and the approved `.github/workflows/tests.yml` are committed. The circuit SVG and the live-update JavaScript are **inside** `templates/index.html`; no external JS or image asset is needed. Local `.venv`, generated caches, browser screenshots and temporary test scripts **must not be staged**. Use explicit file names when running `git add`.
 
 Further details: [Design](docs/design-note.md), [Validation](docs/validation.md), [Reflection](docs/reflection.md).
+
+### Moodle submission (Lab 02 handout)
+
+Submit the **repository URL and final commit SHA** through Moodle. Include a **screenshot of the working Flask page with a successful DC bias calculation** and the **automated test log** as evidence. The handout also expects code review, design/planning work and a student-owned reflection. Keep screenshots and test logs outside the tracked source-code tree unless a separately authorized submission method explicitly requires them.
