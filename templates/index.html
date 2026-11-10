@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Lab 02 BJT DC bias calculator with a live, engineering-verified NPN voltage-divider schematic.">
+  <title>BJT DC Bias · Lab 02</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="site-header">
+      <div class="brand-lockup" aria-label="Electrical Engineering Lab 02">
+        <span class="brand-symbol" aria-hidden="true">
+          <svg viewBox="0 0 36 36" fill="none">
+            <circle cx="18" cy="18" r="15" stroke="currentColor" stroke-opacity=".45"/>
+            <path d="M10 18h7m0-8v16m0-12 8-6m-8 14 8 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            <path d="m21 24 4 4-5-1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <div>
+          <span class="brand-kicker">ELECTRONICS LABORATORY</span>
+          <span class="brand-name">DC BIAS <span class="brand-separator">/</span> 02</span>
+        </div>
+      </div>
+      <span class="header-chip"><span class="chip-dot" aria-hidden="true"></span> NPN · COMMON EMITTER</span>
+    </header>
+
+    <main>
+      <section class="page-heading" aria-labelledby="page-title">
+        <div>
+          <p class="eyebrow"><span class="eyebrow-line" aria-hidden="true"></span> INTERACTIVE ENGINEERING WORKSPACE</p>
+          <h1 id="page-title">BJT <em>DC Bias</em> Analysis</h1>
+          <p class="page-intro">Voltage-divider bias · Live operating-point calculation · Electrical consistency checks</p>
+        </div>
+        <div class="heading-index" aria-label="Exercise number"><span>LAB</span><strong>02</strong></div>
+      </section>
+
+      <div class="workbench">
+        <section class="panel inputs-panel" aria-labelledby="inputs-title">
+          <div class="panel-heading">
+            <div>
+              <p class="section-index">01 / CONFIGURATION</p>
+              <h2 id="inputs-title">Circuit parameters</h2>
+            </div>
+            <span class="panel-icon" aria-hidden="true">≡</span>
+          </div>
+          <p class="panel-description">Set the supply, resistor network and transistor assumptions.</p>
+          <form action="{{ url_for('calculate_html') }}" method="post" id="bias-form" novalidate>
+            <div class="parameter-grid">
+              {% for key, label in fields.items() %}
+              <div class="parameter-item{% if errors.get(key) %} has-error{% endif %}">
+                <label for="{{ key }}">
+                  <span>{{ label[0] }}</span>
+                  <span class="unit-label">{{ label[1] if label[1] else 'ratio' }}</span>
+                </label>
+                <input
+                  id="{{ key }}" name="{{ key }}" type="text" inputmode="decimal"
+                  value="{{ form[key] }}" autocomplete="off" spellcheck="false"
+                  aria-describedby="error-{{ key }}"{% if errors.get(key) %} aria-invalid="true"{% endif %}
+                >
+                <small id="error-{{ key }}" class="field-error" data-error-key="{{ key }}">{{ errors.get(key, '') }}</small>
+              </div>
+              {% endfor %}
+            </div>
+            <div class="form-actions">
+              <button class="primary-button" type="submit">Calculate operating point <span aria-hidden="true">↗</span></button>
+              <a class="reset-button" id="reset-button" href="{{ url_for('index') }}">Reset</a>
+            </div>
+          </form>
+          <p class="form-note">Resistance inputs use <strong>kΩ</strong>. Calculations use Ω and A internally.</p>
+          <noscript><p class="noscript-note">Live updates need JavaScript. The Calculate button still works normally.</p></noscript>
+          <p id="input-alert" class="input-alert" role="alert"{% if not errors %} hidden{% endif %}>Input error: Check the highlighted fields.</p>
+        </section>
+
+        <section class="panel circuit-panel" aria-labelledby="circuit-title">
+          <div class="panel-heading circuit-heading">
+            <div>
+              <p class="section-index">02 / SCHEMATIC</p>
+              <h2 id="circuit-title">NPN voltage-divider bias</h2>
+            </div>
+            <span class="diagram-tag">DC · Q-POINT</span>
+          </div>
+          <div class="diagram-toolbar">
+            <span><span class="legend-swatch legend-wire" aria-hidden="true"></span> Circuit connection</span>
+            <span><span class="legend-swatch legend-value" aria-hidden="true"></span> Calculated value</span>
+            <span><span class="legend-swatch legend-current" aria-hidden="true"></span> Conventional current</span>
+          </div>
+          <p class="mobile-pan-hint"><span aria-hidden="true">↔</span> Swipe horizontally to inspect the complete circuit.</p>
+          <div class="schematic-scroll" aria-label="Scrollable circuit drawing on small screens">
+            <svg
+              id="bias-schematic" class="bias-schematic"
+              xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 580"
+              preserveAspectRatio="xMidYMid meet" role="img"
+              aria-labelledby="schematic-svg-title schematic-svg-desc"
+            >
+              <title id="schematic-svg-title">NPN transistor with voltage-divider DC bias</title>
+              <desc id="schematic-svg-desc">R1 connects VCC to base; R2 connects base to ground; RC connects VCC to collector; RE connects emitter to ground. The emitter arrow points outward, indicating an NPN transistor. Values update from the server calculation.</desc>
+              <defs>
+                <marker id="npn-emitter-arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+                  <path d="M0 0 L7 4 L0 8 Z" fill="#f9bd70"/>
+                </marker>
+                <marker id="current-arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+                  <path d="M0 0 L7 4 L0 8 Z" fill="#f9bd70"/>
+                </marker>
+              </defs>
+
+              <!-- One continuous VCC rail, split through each physical resistor. -->
+              <g class="circuit-wires" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M160 98 H575 M220 98 V165 M220 245 V348 H428 M220 348 V400 M220 472 V512"/>
+                <path d="M575 98 V165 M575 245 V286 H490"/>
+                <path d="M490 420 H575 V438 M575 484 V512 M220 512 H575"/>
+                <path d="M398 512 V529"/>
+              </g>
+
+              <!-- IEC-style resistor blocks. These SVG elements remain perfectly sharp at zoom. -->
+              <g class="resistor-symbols">
+                <rect x="206" y="165" width="28" height="80" rx="3"/>
+                <rect x="206" y="400" width="28" height="72" rx="3"/>
+                <rect x="561" y="165" width="28" height="80" rx="3"/>
+                <rect x="561" y="438" width="28" height="46" rx="3"/>
+              </g>
+
+              <!-- A single common ground reference for R2 and RE. -->
+              <g class="ground-symbol" stroke-linecap="round">
+                <path d="M378 529 H418 M385 535 H411 M393 541 H403"/>
+              </g>
+
+              <!-- Base, collector, emitter transistor leads and outward NPN arrow. -->
+              <circle class="transistor-housing" cx="450" cy="356" r="73"/>
+              <g class="transistor-leads">
+                <path d="M428 325 V389"/>
+                <path d="M440 338 L490 286"/>
+                <path d="M440 372 L490 420" marker-end="url(#npn-emitter-arrow)"/>
+              </g>
+              <g class="circuit-junctions">
+                <circle cx="220" cy="98" r="5"/><circle cx="575" cy="98" r="5"/>
+                <circle cx="220" cy="348" r="5"/><circle cx="575" cy="286" r="5"/>
+                <circle cx="575" cy="420" r="5"/>
+              </g>
+
+              <!-- Conventional current directions, not electronic flow. -->
+              <g class="current-flow">
+                <path d="M331 320 H384" marker-end="url(#current-arrow)"/>
+                <path d="M660 310 V364" marker-end="url(#current-arrow)"/>
+                <path d="M660 435 V489" marker-end="url(#current-arrow)"/>
+              </g>
+              <g class="current-captions">
+                <text x="331" y="277">I<tspan baseline-shift="sub" font-size="12">B</tspan></text>
+                <text x="676" y="341">I<tspan baseline-shift="sub" font-size="12">C</tspan></text>
+                <text x="676" y="465">I<tspan baseline-shift="sub" font-size="12">E</tspan></text>
+              </g>
+
+              <!-- Resistances and assumptions come from the current form inputs. -->
+              <g class="component-labels">
+                <text x="248" y="181">R1</text>
+                <text x="248" y="201" class="component-number"><tspan data-input-key="r1">{{ form['r1'] }}</tspan> kΩ</text>
+                <text x="248" y="422">R2</text>
+                <text x="248" y="442" class="component-number"><tspan data-input-key="r2">{{ form['r2'] }}</tspan> kΩ</text>
+                <text x="606" y="181">RC</text>
+                <text x="606" y="201" class="component-number"><tspan data-input-key="rc">{{ form['rc'] }}</tspan> kΩ</text>
+                <text x="606" y="451">RE</text>
+                <text x="606" y="470" class="component-number"><tspan data-input-key="re">{{ form['re'] }}</tspan> kΩ</text>
+                <text x="145" y="75" class="supply-caption">VCC</text>
+                <text x="199" y="75" class="supply-number"><tspan data-input-key="vcc">{{ form['vcc'] }}</tspan> V</text>
+                <text x="403" y="264" class="transistor-caption">Q1 · NPN</text>
+                <text x="376" y="455" class="component-number">β <tspan data-input-key="beta">{{ form['beta'] }}</tspan> · VBE <tspan data-input-key="vbe">{{ form['vbe'] }}</tspan> V</text>
+              </g>
+              <g class="terminal-labels">
+                <text x="405" y="320">B</text>
+                <text x="496" y="278">C</text>
+                <text x="495" y="442">E</text>
+              </g>
+
+              <!-- Each output is copied verbatim from the Python-calculated display map. -->
+              <g class="diagram-measurements">
+                <text class="measure-key" x="295" y="363">V<tspan baseline-shift="sub" font-size="12">B</tspan></text>
+                <text class="measure-value" x="295" y="383" data-result-key="VB_V">{{ display.get('VB_V', '—') }}</text>
+                <text class="measure-key" x="605" y="260">V<tspan baseline-shift="sub" font-size="12">C</tspan></text>
+                <text class="measure-value" x="605" y="280" data-result-key="VC_V">{{ display.get('VC_V', '—') }}</text>
+                <text class="measure-key" x="509" y="373">V<tspan baseline-shift="sub" font-size="12">E</tspan></text>
+                <text class="measure-value" x="509" y="394" data-result-key="VE_V">{{ display.get('VE_V', '—') }}</text>
+                <text class="measure-key" x="331" y="546">V<tspan baseline-shift="sub" font-size="12">CE</tspan></text>
+                <text class="measure-value" x="331" y="566" data-result-key="VCE_V">{{ display.get('VCE_V', '—') }}</text>
+                <text class="measure-value current-value" x="325" y="299" data-result-key="IB_A">{{ display.get('IB_A', '—') }}</text>
+                <text class="measure-value current-value" x="672" y="384" data-result-key="IC_A">{{ display.get('IC_A', '—') }}</text>
+                <text class="measure-value current-value" x="672" y="510" data-result-key="IE_A">{{ display.get('IE_A', '—') }}</text>
+              </g>
+            </svg>
+          </div>
+          <p class="schematic-footnote"><span class="footnote-marker" aria-hidden="true">↗</span> Equivalent DC-bias model · The transistor drawing and values are vector-rendered, not a simulated component image.</p>
+        </section>
+      </div>
+
+      <section class="readout-section" aria-labelledby="results-title">
+        <div class="readout-header">
+          <div>
+            <p class="section-index">03 / OPERATING POINT</p>
+            <h2 id="results-title">Calculated results</h2>
+          </div>
+          <div id="live-status" class="live-status" aria-live="polite" aria-atomic="true"><span class="status-dot" aria-hidden="true"></span><span id="status-text">{% if errors %}Check inputs{% else %}Calculated by Python{% endif %}</span></div>
+        </div>
+        <div class="readout-layout">
+          <div class="result-group">
+            <h3 class="group-heading">Node voltages <span>V</span></h3>
+            <div class="results-grid voltages-grid">
+              {% for key in ('VB_V', 'VE_V', 'VC_V', 'VCE_V') %}
+              <article class="result-card">
+                <span class="result-label">{{ result_labels[key] }}</span>
+                <output class="result-value" data-result-key="{{ key }}">{{ display.get(key, '—') }}</output>
+              </article>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="result-group">
+            <h3 class="group-heading">Branch currents <span>A</span></h3>
+            <div class="results-grid current-grid">
+              {% for key in ('IB_A', 'IC_A', 'IE_A') %}
+              <article class="result-card">
+                <span class="result-label">{{ result_labels[key] }}</span>
+                <output class="result-value" data-result-key="{{ key }}">{{ display.get(key, '—') }}</output>
+              </article>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="result-group equivalent-group">
+            <h3 class="group-heading">Thevenin equivalent <span>DC</span></h3>
+            <div class="results-grid equivalent-grid">
+              {% for key in ('VTH_V', 'RTH_OHM') %}
+              <article class="result-card secondary-card">
+                <span class="result-label">{{ result_labels[key] }}</span>
+                <output class="result-value" data-result-key="{{ key }}">{{ display.get(key, '—') }}</output>
+              </article>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="verification-panel panel" aria-labelledby="validation-title">
+        <div class="panel-heading">
+          <div>
+            <p class="section-index">04 / ENGINEERING VERIFICATION</p>
+            <h2 id="validation-title">Model integrity</h2>
+          </div>
+          <span id="region-badge" class="region-badge" data-region="{{ point.region if point else 'invalid' }}">{{ point.region|replace('_', ' ')|title if point else 'Input invalid' }}</span>
+        </div>
+        <p id="model-description" class="model-description">{{ point.model if point else 'Waiting for valid input.' }}</p>
+        {% set check_labels = {
+          'transistor_kcl': 'Transistor KCL',
+          'divider_kcl': 'Divider KCL',
+          'collector_drop': 'Collector resistor drop',
+          'emitter_drop': 'Emitter resistor drop',
+          'vce_identity': 'VCE voltage identity',
+          'region_consistency': 'Operating-region consistency'
+        } %}
+        <ul class="checks-grid" id="check-list">
+          {% for key, label in check_labels.items() %}
+          <li class="check-item">
+            <span class="check-icon" aria-hidden="true">✓</span>
+            <span>{{ label }}</span>
+            <strong class="check-state" data-check-key="{{ key }}">{% if point %}{{ 'PASS' if point.checks[key] else 'FAIL' }}{% else %}—{% endif %}</strong>
+          </li>
+          {% endfor %}
+        </ul>
+        <ul class="warning-list" id="warning-list" aria-live="polite">{% if point %}{% for warning in point.warnings %}<li>{{ warning }}</li>{% endfor %}{% endif %}</ul>
+        <p class="model-note">Educational fixed-β / fixed-VBE analysis. Cutoff and saturation are approximate operating-region estimates, not SPICE or measured device behavior.</p>
+      </section>
+    </main>
+
+    <footer class="site-footer"><span>BJT DC BIAS · LAB 02</span><span>Physics-led calculations · Responsive SVG</span></footer>
+  </div>
+
+  <script>
+    (() => {
+      "use strict";
+      const form = document.getElementById("bias-form");
+      const statusText = document.getElementById("status-text");
+      const statusBox = document.getElementById("live-status");
+      const regionBadge = document.getElementById("region-badge");
+      const modelDescription = document.getElementById("model-description");
+      const warningList = document.getElementById("warning-list");
+      const inputAlert = document.getElementById("input-alert");
+      const defaults = {{ default_form | tojson }};
+      const names = Object.keys(defaults);
+      let timer = null;
+      let sequence = 0;
+      let controller = null;
+
+      const currentValues = () => Object.fromEntries(
+        names.map(name => [name, form.elements.namedItem(name).value])
+      );
+      const setStatus = (state, message) => {
+        statusBox.dataset.state = state;
+        statusText.textContent = message;
+      };
+      const setMeasurements = (display) => {
+        document.querySelectorAll("[data-result-key]").forEach(element => {
+          element.textContent = display[element.dataset.resultKey] ?? "—";
+        });
+      };
+      const syncComponentLabels = (values) => {
+        document.querySelectorAll("[data-input-key]").forEach(element => {
+          element.textContent = values[element.dataset.inputKey] ?? "—";
+        });
+      };
+      const clearErrors = () => {
+        names.forEach(name => {
+          const element = form.elements.namedItem(name);
+          element.removeAttribute("aria-invalid");
+          element.closest(".parameter-item").classList.remove("has-error");
+          document.querySelector('[data-error-key="' + name + '"]').textContent = "";
+        });
+        inputAlert.hidden = true;
+      };
+      const showErrors = (errors) => {
+        clearErrors();
+        for (const [name, message] of Object.entries(errors || {})) {
+          if (!names.includes(name)) continue;
+          const element = form.elements.namedItem(name);
+          element.setAttribute("aria-invalid", "true");
+          element.closest(".parameter-item").classList.add("has-error");
+          document.querySelector('[data-error-key="' + name + '"]').textContent = String(message);
+        }
+        inputAlert.textContent = "Input error: Check the highlighted fields.";
+        inputAlert.hidden = false;
+      };
+      const renderChecks = (checks) => {
+        document.querySelectorAll("[data-check-key]").forEach(element => {
+          const valid = checks?.[element.dataset.checkKey];
+          element.textContent = valid === undefined ? "—" : valid ? "PASS" : "FAIL";
+          element.dataset.checkState = valid === undefined ? "unknown" : valid ? "pass" : "fail";
+        });
+      };
+      const renderWarnings = (warnings) => {
+        warningList.replaceChildren();
+        for (const warning of warnings || []) {
+          const item = document.createElement("li");
+          item.textContent = warning;
+          warningList.appendChild(item);
+        }
+      };
+      const renderRegion = (region, model) => {
+        regionBadge.dataset.region = region;
+        regionBadge.textContent = region.replaceAll("_", " ");
+        modelDescription.textContent = model;
+      };
+      const invalidateReadout = () => {
+        setMeasurements({});
+        renderChecks({});
+        renderWarnings([]);
+        renderRegion("pending", "Awaiting the current inputs.");
+      };
+
+      const calculate = async (ticket) => {
+        const active = new AbortController();
+        controller = active;
+        setStatus("calculating", "Calculating…");
+        try {
+          const response = await fetch({{ url_for('calculate_json') | tojson }}, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(currentValues()),
+            signal: active.signal
+          });
+          const data = await response.json();
+          if (ticket !== sequence) return;
+          if (!response.ok || !data.ok) {
+            showErrors(data.errors);
+            renderRegion("invalid", "Input validation failed. No operating point is shown.");
+            setStatus("error", "Check inputs");
+            return;
+          }
+          clearErrors();
+          setMeasurements(data.display || {});
+          renderChecks(data.checks || {});
+          renderWarnings(data.warnings || []);
+          renderRegion(data.region, data.model);
+          setStatus("ready", "Updated by Python");
+        } catch (error) {
+          if (ticket !== sequence || error.name === "AbortError") return;
+          renderRegion("unavailable", "Unable to reach the calculation server.");
+          setStatus("error", "Connection error");
+          inputAlert.textContent = "The calculation server is unavailable. You can still use the Calculate button to submit the form.";
+          inputAlert.hidden = false;
+        } finally {
+          if (controller === active) controller = null;
+        }
+      };
+      const schedule = () => {
+        const ticket = ++sequence;
+        window.clearTimeout(timer);
+        controller?.abort();
+        controller = null;
+        clearErrors();
+        invalidateReadout();
+        syncComponentLabels(currentValues());
+        setStatus("pending", "Waiting for input…");
+        timer = window.setTimeout(() => calculate(ticket), 350);
+      };
+
+      form.addEventListener("input", schedule);
+      document.getElementById("reset-button").addEventListener("click", event => {
+        event.preventDefault();
+        for (const [name, value] of Object.entries(defaults)) {
+          form.elements.namedItem(name).value = value;
+        }
+        schedule();
+      });
+    })();
+  </script>
+</body>
+</html>
