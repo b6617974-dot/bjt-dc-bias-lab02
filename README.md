@@ -1,98 +1,50 @@
-# Lab 02 — BJT DC Bias Calculator
+# ENG29 2121 Lab 03 โปรแกรมไบอัสทรานซิสเตอร์ BJT
 
-An interactive Flask application for the **DC operating point of an NPN common-emitter transistor with voltage-divider bias**. The laboratory's seven input parameters, calculation module, HTML template, CSS and tests are preserved; the implementation adds an accurate inline circuit schematic, real-time feedback, electrical consistency checks and one GitHub Actions workflow.
+โปรแกรม Flask คำนวณจุดทำงาน DC ของทรานซิสเตอร์ NPN ใน **Fixed Bias**, **Emitter Bias** แบบแหล่งจ่ายเดียว และ **Voltage Divider Bias** หน้าจอ Workbench A แสดงวงจร ผลคำนวณ สมการแทนค่า และตารางเทียบกับค่าอ้างอิงจากสมการโหนด
 
-## 1. Run the application
+## วิธีติดตั้งและเปิดโปรแกรม
 
-Install **Python 3.12** or later. From this repository's folder:
+ต้องการ Python 3.12 ขึ้นไป เปิด PowerShell ในโฟลเดอร์ที่มี `app.py` หลังแตก ZIP หรือรับซอร์สจาก GitHub
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python -m flask --app app run
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m flask --app app run --host 127.0.0.1 --port 8780
 ```
 
-Open `http://127.0.0.1:5000/`. On Linux/macOS, use `source .venv/bin/activate` instead of the PowerShell activation command. If PowerShell prevents activation, run `.\.venv\Scripts\python.exe` directly for the install and Flask commands.
+เปิด [โปรแกรมไบอัสทรานซิสเตอร์ BJT](http://127.0.0.1:8780/) ในเบราว์เซอร์บนเครื่องที่รัน Flask รักษาหน้าต่าง PowerShell ไว้ขณะใช้งาน แล้วกด `Ctrl+C` เมื่อต้องการหยุดเซิร์ฟเวอร์ บน macOS หรือ Linux ใช้ `.venv/bin/python` แทน `.\.venv\Scripts\python.exe`
 
-The page calculates a default operating point immediately. Editing any input updates both the numeric cards and the vector circuit after a short delay (~350 ms). **Calculate operating point** also submits the form normally when JavaScript is unavailable. **Reset** restores the example values.
+## วิธีใช้งานและทำการทดลอง
 
-## 2. Inputs and output units
+1. เลือกวงจรหรือชุดโจทย์ A1–A5 ซึ่งอิงใบงานฉบับร่าง กรอกตัวต้านทานเป็น kΩ แรงดันเป็น V และ β เป็นจำนวนไร้หน่วย
+2. กด **คำนวณ** แล้วเปิด **ดูสูตรและผลเทียบทั้งหมด** เพื่อดูสมการ หน่วย ผลโปรแกรม และผลอ้างอิง แผงสูตรมีรูปวงจรประกอบ บนมือถือให้เลื่อนในกรอบสูตร
+3. สำหรับ A3 → A4 เลือก Emitter Bias คง (V_{CC}=12\ \mathrm V), (R_B=1000\ \mathrm{kΩ}), (R_C=2.2\ \mathrm{kΩ}), (β=100) และ (V_{BE}=0.70\ \mathrm V) เปลี่ยนเฉพาะ (R_E) จาก 1 เป็น 2 kΩ แล้วกดคำนวณอีกครั้ง ค่า (I_C) ตามแบบจำลองลดจาก 1.026 เป็น 0.940 mA
+4. เครื่องมือบนวงจรมีโพรบแรงดันและการเน้นเส้นทางตามสมการ ส่วนแผงทดลองมีการเทียบกรณี กวาดค่าพารามิเตอร์ และหา (R_E) จากเป้าหมาย (I_C) ค่าที่กรอกว่ามาจากการวัดและกรณีอ้างอิงอยู่ในหน้าที่เปิดอยู่จนกว่าจะโหลดหน้าใหม่ รายงานเลือกพิมพ์เป็น PDF จากเบราว์เซอร์ได้
 
-| UI name | Meaning | Unit | Default |
-|---|---|---|---:|
-| VCC | Supply voltage | V | 12 |
-| R1 | Divider resistor, VCC to base | kΩ | 100 |
-| R2 | Divider resistor, base to ground | kΩ | 22 |
-| RC | Collector resistor | kΩ | 2.2 |
-| RE | Emitter resistor | kΩ | 1 |
-| β | Fixed current gain | dimensionless | 100 |
-| VBE | Assumed base-emitter voltage | V | 0.70 |
+เมื่อปิด JavaScript ให้เลือกวงจร กด **Apply mode** แล้วกรอกค่าและกด **Calculate** ฟอร์มจะส่งไปยัง Flask โดยตรง
 
-The Python calculation engine accepts resistance in **Ω** and current in **A**. The Flask layer converts the four kΩ inputs to Ω once and formats the result for display. It reports $V_B,V_E,V_C,V_{CE},I_B,I_C,I_E,V_{TH},R_{TH}$.
+## สมการและเส้นทางข้อมูล
 
-## 3. Method and engineering limits
+- **Fixed Bias** มี (V_E=0) และ (I_B=(V_{CC}-V_{BE})/R_B\)
+- **Emitter Bias** มี (I_B=(V_{CC}-V_{BE})/[R_B+(β+1)R_E]\)
+- **Voltage Divider** ใช้ (V_{TH}=V_{CC}R_2/(R_1+R_2)\), (R_{TH}=R_1R_2/(R_1+R_2)\) และ (I_B=(V_{TH}-V_{BE})/[R_{TH}+(β+1)R_E]\)
 
-The divider is replaced by its Thévenin equivalent:
+ในเขต Forward Active ใช้ (I_C=βI_B\), (I_E=I_B+I_C\), (V_C=V_{CC}-I_CR_C\) และ (V_{CE}=V_C-V_E\) โดย (V_E=I_ER_E\) สำหรับวงจรที่มี (R_E\) แบบจำลองกำหนด (I_B,I_C>0\), (V_C>V_B\) และ (V_{CE}>0.20\ \mathrm V) ส่วน Cutoff และ Saturation ของ Divider เป็นค่าประมาณตามแบบจำลองของใบงาน
 
-$$
-V_{TH}=\frac{V_{CC}R_2}{R_1+R_2},\qquad
-R_{TH}=\frac{R_1R_2}{R_1+R_2}
-$$
+ฟอร์มและ API รับฟิลด์ `re` เป็น kΩ `parse_inputs` ใน `app.py` แปลงเป็น `re_ohm` ด้วยการคูณ 1,000 แล้วให้ `calculate_by_mode` ใน `dc_bias.py` เลือก `calculate_emitter_bias` เมื่อ `mode=emitter` หน้าเว็บอัปเดตจากผลคำนวณรอบล่าสุด รายละเอียดการทวนสมการและกรณีทดสอบอยู่ใน [เอกสารตรวจสอบ](docs/validation.md)
 
-In forward-active operation:
-
-$$
-I_B=\frac{V_{TH}-V_{BE}}{R_{TH}+(\beta+1)R_E},\quad
-I_C=\beta I_B,\quad I_E=(\beta+1)I_B
-$$
-
-$$
-V_E=I_ER_E,\qquad V_B=V_E+V_{BE},\qquad
-V_C=V_{CC}-I_CR_C,\qquad V_{CE}=V_C-V_E
-$$
-
-The program distinguishes:
-
-- **Forward active:** a consistent operating point under fixed-β, fixed-VBE assumptions.
-- **Cutoff estimate:** zero transistor current and negligible leakage when the divider cannot forward-bias the base.
-- **Saturation estimate:** a bounded approximate solution using $V_{CE(sat)}=0.20\,V$ and the supplied VBE. The base-collector junction must also be forward-biased ($V_B > V_C$); otherwise the program declines to report a saturation Q-point.
-- **Outside model:** no consistent Q-point can be asserted within those approximations.
-
-Automatic checks evaluate transistor KCL, divider KCL, collector/emitter resistor drops, $V_{CE}=V_C-V_E$, and region consistency. A **PASS** verifies the internal equations, **not** actual transistor behavior. This is **not SPICE**, a measured circuit, an AC amplifier model or a device-curve analysis.
-
-Inputs must be finite and physically positive; intentionally broad numeric software bounds prevent invalid or unreasonable computations but are **not component ratings**.
-
-## 4. Run the tests
+## วิธีรันชุดทดสอบ
 
 ```powershell
-python -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Tests cover independent default numeric references, active/cutoff/saturation models, invalid values, KCL/KVL, real Flask HTML/JSON routes, form fallback, and equivalence between schematic labels and result cards. The approved GitHub Actions workflow runs the same command on Python 3.12 after each push or pull request.
+ชุดทดสอบครอบคลุมผลทั้งสามโหมด การตรวจฟอร์มและ API แรงดันตกคร่อม จุดขอบเขตการทำงาน และการคำนวณทดลองย้อนกลับ โปรแกรมใช้ β และ VBE คงที่ ผลโพรบเป็นค่าจากแบบจำลอง ตัวเลขที่กรอกในช่องค่าที่วัดต้องมาจากการวัดของผู้ใช้
 
-### HTTP interface
+## บทบาทของ AI และนักศึกษา
 
-| Method | Path | Function |
-|---|---|---|
-| GET | `/` | Render the form and default calculated result |
-| POST | `/calculate` | Recalculate via standard HTML form; show errors inline |
-| POST | `/api/calculate` | Receive JSON inputs, return JSON outputs |
+Codex ช่วยวางแผน เขียนและตรวจโค้ด Flask/Python สร้างหน้าจอและเครื่องมือ ทวนสมการจากค่าอ้างอิงอิสระ และรันชุดทดสอบกับเบราว์เซอร์จริง ผล A1–A5 ระบุผู้รันและวิธีตรวจในเอกสาร Word นักศึกษาตรวจรับงานและบันทึกกรณีที่ตนทวนด้วยตัวเองในเอกสารเดียวกัน
 
-Example API request:
+ก่อน Commit ให้ตรวจ `git diff` และ `git diff --staged` เลือกเฉพาะไฟล์ของโครงการ เก็บ `.venv`, `.env`, credentials และภาพหลักฐานไว้นอก Git หลักฐานส่งงานอ้างถึง Commit SHA ของรุ่นที่ใช้ตรวจ
 
-```json
-{"vcc":"12","r1":"100","r2":"22","rc":"2.2","re":"1","beta":"100","vbe":"0.70"}
-```
-
-A successful response contains `ok`, `region`, `model`, raw SI-unit `results`, human-readable `display`, `checks`, and `warnings`. Invalid inputs return a structured 4xx response with field-specific `errors`; they do not produce a fabricated operating point.
-
-## 5. Submission file discipline
-
-Only the handout's named files and the approved `.github/workflows/tests.yml` are committed. The circuit SVG and the live-update JavaScript are **inside** `templates/index.html`; no external JS or image asset is needed. Local `.venv`, generated caches, browser screenshots and temporary test scripts **must not be staged**. Use explicit file names when running `git add`.
-
-Further details: [Design](docs/design-note.md), [Validation](docs/validation.md), [Reflection](docs/reflection.md).
-
-### Moodle submission (Lab 02 handout)
-
-Submit the **repository URL and final commit SHA** through Moodle. Include a **screenshot of the working Flask page with a successful DC bias calculation** and the **automated test log** as evidence. The handout also expects code review, design/planning work and a student-owned reflection. Keep screenshots and test logs outside the tracked source-code tree unless a separately authorized submission method explicitly requires them.
+แหล่งอ้างอิงสมการ [Georgia Tech ECE 3050 The BJT Bias Equation](https://leachlegacy.ece.gatech.edu/ece3050/notes/bjt/bjtbias.pdf#page=1)

@@ -1,414 +1,1776 @@
-<!DOCTYPE html>
+{% macro schematic(mode, id, form, values) -%}
+<svg id="{{ id }}" viewBox="0 0 440 350" role="img" aria-labelledby="{{ id }}-title {{ id }}-desc" xmlns="http://www.w3.org/2000/svg">
+  <title id="{{ id }}-title">{{ modes[mode] }} NPN schematic</title>
+  <desc id="{{ id }}-desc">
+    {% if mode == 'divider' %}R1 from VCC to base and R2 from base to ground.{% else %}RB from VCC to base.{% endif %}
+    RC from VCC to collector.
+    {% if mode == 'fixed' %}Emitter directly grounded.{% else %}RE from emitter to ground.{% endif %}
+    Reference currents IB and IC enter the transistor and IE leaves it.
+  </desc>
+  <circle class="transistor-housing" cx="270" cy="181" r="48"/>
+  <g class="circuit-wires">
+    <path data-link="vcc-base" d="M112 80V49H328V80 M112 127V180H252"/>
+    <path data-link="rc-collector" d="M328 127V141H290"/>
+    <path data-link="emitter-rail" d="M290 221H328"/>
+    {% if mode == 'divider' %}
+    <path data-link="base-r2-ground" d="M112 180V248m0 47v24"/>
+    <path class="ground-symbol" d="M94 319h36m-29 6h22m-16 6h10"/>
+    {% endif %}
+    {% if mode == 'fixed' %}
+    <path data-link="emitter-ground" d="M328 221V319"/>
+    {% else %}
+    <path data-link="emitter-re-ground" d="M328 221V248m0 47v24"/>
+    {% endif %}
+    <path class="ground-symbol" d="M310 319h36m-29 6h22m-16 6h10"/>
+  </g>
+  <path class="transistor-leads" d="M252 155v51m0-39 38-26m-38 51 38 29"/>
+  <path class="emitter-arrow" d="M290 221l-15-5 7-10z"/>
+  {% set top_key = 'r1' if mode == 'divider' else 'rb' %}
+  {{ resistor_label(top_key, 112, 80, 94, 'end', form) }}
+  {{ resistor_label('rc', 328, 80, 348, 'start', form) }}
+  {% if mode == 'divider' %}{{ resistor_label('r2', 112, 248, 94, 'end', form) }}{% endif %}
+  {% if mode != 'fixed' %}{{ resistor_label('re', 328, 248, 348, 'start', form) }}{% endif %}
+  <g class="circuit-junctions">
+    <circle cx="220" cy="49" r="4"/><circle cx="328" cy="141" r="4"/><circle cx="328" cy="221" r="4"/>
+    {% if mode == 'divider' %}<circle cx="112" cy="180" r="4"/>{% endif %}
+  </g>
+  <path class="circuit-wires" data-link="supply-feed" d="M220 34v15"/>
+  <text x="220" y="27" text-anchor="middle" class="component-labels" data-component="VCC">VCC · <tspan data-input-key="vcc">{{ form.get('vcc', '—') }}</tspan> V</text>
+  <g class="terminal-labels"><text x="230" y="169" data-terminal="B">B</text><text x="295" y="132" data-terminal="C">C</text><text x="295" y="213" data-terminal="E">E</text></g>
+  <text class="transistor-caption" text-anchor="middle" x="264" y="256">Q1 · NPN</text>
+  <g class="measure-value">
+    <text x="144" y="207" data-voltage="VB" data-result-key="VB_V">{{ values.get('VB_V', '—') }}</text>
+    <text x="347" y="146" data-voltage="VC" data-result-key="VC_V">{{ values.get('VC_V', '—') }}</text>
+    <text x="347" y="226" data-voltage="VE" data-result-key="VE_V">{{ values.get('VE_V', '—') }}</text>
+  </g>
+  <g class="current-directions" aria-hidden="true">
+    <g data-current-direction="IB"><path d="M145 159H198 M193 154L198 159L193 164"/><text x="151" y="149">IB</text></g>
+    <g data-current-direction="IC"><path d="M307 81V116 M302 111L307 116L312 111"/><text x="286" y="102">IC</text></g>
+    <g data-current-direction="IE"><path d="M307 265V300 M302 295L307 300L312 295"/><text x="286" y="284">IE</text></g>
+  </g>
+</svg>
+{%- endmacro %}
+{% macro resistor_label(key, x, y, label_x, anchor, form) -%}
+<path class="circuit-wires" d="M{{ x }} {{ y }} l-8 6 16 7 -16 7 16 7 -16 7 16 7 -8 6" data-resistor="{{ key|upper }}"/>
+<text class="component-labels" text-anchor="{{ anchor }}" x="{{ label_x }}" y="{{ y+15 }}">{{ key|upper }}</text>
+<text class="component-number" text-anchor="{{ anchor }}" x="{{ label_x }}" y="{{ y+34 }}" data-component="{{ key|upper }}"><tspan data-input-key="{{ key }}">{{ form.get(key, '—') }}</tspan> kΩ</text>
+{%- endmacro %}
+{% macro reading_strip(values) -%}
+<dl class="diagram-readings">
+  {% for key, symbol in [('IB_A','IB'), ('IC_A','IC'), ('IE_A','IE'), ('VCE_V','VCE')] %}
+  <div><dt>{{ symbol }}</dt><dd data-result-key="{{ key }}">{{ values.get(key, '—') }}</dd></div>
+  {% endfor %}
+</dl>
+{%- endmacro %}
+{% macro parameter(key, label, unit, value, error) -%}
+<div class="field{% if error %} has-error{% endif %}">
+  <label for="{{ key }}">{{ label }}</label>
+  <div class="field-value">
+    <input id="{{ key }}" name="{{ key }}" value="{{ value }}" type="text" inputmode="decimal" data-input="{{ 'β' if key == 'beta' else key|upper }}"
+      aria-describedby="unit-{{ key }} error-{{ key }}"{% if error %} aria-invalid="true"{% endif %}>
+    <span class="unit" id="unit-{{ key }}">{{ unit or 'unitless' }}</span>
+  </div>
+  <span class="field-error" id="error-{{ key }}" data-error-key="{{ key }}">{{ error }}</span>
+</div>
+{%- endmacro %}
+{% set regions = {'forward_active':'Forward Active', 'cutoff_estimate':'Cutoff estimate', 'saturation_estimate':'Saturation estimate', 'outside_model':'Outside model', 'invalid':'Invalid input', 'pending':'Awaiting input', 'unavailable':'Unavailable', 'mismatch':'Unconfirmed operating point'} %}
+{% set comparison_text = {'match':'Methods agree within tolerance', 'different':'Methods give different results', 'unavailable':'Comparison unavailable'} %}
+{% set engineering_text = {'pass':'Pass', 'fail':'Fail', 'na':'N/A'} %}
+{% set result_labels_th = {'VB_V':'แรงดันเบส (VB)', 'VE_V':'แรงดันอิมิตเตอร์ (VE)', 'VC_V':'แรงดันคอลเลกเตอร์ (VC)', 'VCE_V':'แรงดัน C–E (VCE)', 'IB_A':'กระแสเบส (IB)', 'IC_A':'กระแสคอลเลกเตอร์ (IC)', 'IE_A':'กระแสอิมิตเตอร์ (IE)', 'VTH_V':'แรงดันเทเวนิน (VTH)', 'RTH_OHM':'ความต้านทานเทเวนิน (RTH)'} %}
+{% set calc = state.calculation or {} %}
+{% set view_region = 'mismatch' if state.region in ('forward_active','cutoff_estimate','saturation_estimate') and calc.state != 'match' else state.region %}
+{% set readings = {} if view_region == 'mismatch' else (state.display or {}) %}
+{% set checks = state.verification or [] %}
+{% set errors = state.errors or {} %}
+{% set comparison = calc.comparison or [] %}
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark">
-  <meta name="description" content="Lab 02 BJT DC bias calculator with a live, engineering-verified NPN voltage-divider schematic.">
-  <title>BJT DC Bias · Lab 02</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Lab 03 · BJT DC Bias Workbench</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <div class="app-shell">
-    <header class="site-header">
-      <div class="brand-lockup" aria-label="Electrical Engineering Lab 02">
-        <span class="brand-symbol" aria-hidden="true">
-          <svg viewBox="0 0 36 36" fill="none">
-            <circle cx="18" cy="18" r="15" stroke="currentColor" stroke-opacity=".45"/>
-            <path d="M10 18h7m0-8v16m0-12 8-6m-8 14 8 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-            <path d="m21 24 4 4-5-1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </span>
-        <div>
-          <span class="brand-kicker">ELECTRONICS LABORATORY</span>
-          <span class="brand-name">DC BIAS <span class="brand-separator">/</span> 02</span>
+<main class="gallery">
+  <article class="concept">
+    <header class="bar"><strong>Circuit Workbench A</strong><div class="top-actions"><span>ENG29 2121 · Lab 03</span><button type="button" id="language" class="button-secondary" lang="th" aria-label="เปลี่ยนเป็นภาษาไทย" hidden>ไทย</button></div></header>
+    <div class="content">
+      <div class="workspace-head">
+        <div class="page-title">
+          <h1 data-th="ไบอัสทรานซิสเตอร์ BJT">BJT DC Bias Analysis</h1>
+          <span id="status" class="status" data-region="{{ view_region }}" role="status">{{ regions.get(view_region, 'Awaiting input') }}</span>
+        </div>
+        <div class="workspace-selects">
+        <form class="mode-form" id="mode-form" method="get" action="/">
+          <label for="mode" data-th="วงจรไบอัส">Bias circuit</label>
+          <select id="mode" name="mode" aria-describedby="mode-error"{% if errors.get('mode') %} aria-invalid="true"{% endif %}>
+            {% for key, name in modes.items() %}
+            <option value="{{ key }}"{% if key == mode %} selected{% endif %}>{{ 'Voltage Divider' if key == 'divider' else name }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="button-secondary" data-th="เลือกวงจร">Apply mode</button>
+          <span class="field-error" id="mode-error">{{ errors.get('mode', '') }}</span>
+        </form>
+        <label class="case-field" id="case-field" hidden><span data-th="ชุดโจทย์ · ฉบับร่าง">Lab cases · Draft</span><select id="example"></select></label>
         </div>
       </div>
-      <span class="header-chip"><span class="chip-dot" aria-hidden="true"></span> NPN · COMMON EMITTER</span>
-    </header>
-
-    <main>
-      <section class="page-heading" aria-labelledby="page-title">
-        <div>
-          <p class="eyebrow"><span class="eyebrow-line" aria-hidden="true"></span> INTERACTIVE ENGINEERING WORKSPACE</p>
-          <h1 id="page-title">BJT <em>DC Bias</em> Analysis</h1>
-          <p class="page-intro">Voltage-divider bias · Live operating-point calculation · Electrical consistency checks</p>
-        </div>
-        <div class="heading-index" aria-label="Exercise number"><span>LAB</span><strong>02</strong></div>
-      </section>
-
+      <noscript><p class="notice">Applying a circuit mode reloads its default values. Edit the inputs, then choose Calculate.</p></noscript>
       <div class="workbench">
-        <section class="panel inputs-panel" aria-labelledby="inputs-title">
-          <div class="panel-heading">
-            <div>
-              <p class="section-index">01 / CONFIGURATION</p>
-              <h2 id="inputs-title">Circuit parameters</h2>
+        <section class="panel circuit" aria-labelledby="circuit-heading">
+          <header class="panel-heading"><h2 id="circuit-heading" data-th="รูปวงจร">Circuit</h2><small class="mode-label">{{ modes[mode] }}</small></header>
+          <div class="schematic" id="main-diagram">{{ schematic(mode,'bias-schematic',schematic_inputs,readings) }}</div>
+          {{ reading_strip(readings) }}
+          <div class="diagram-note"><span data-th="สายวงจร">Wires</span><span data-th="แรงดันโหนด">Node voltages</span><span data-th="ทิศกระแสแบบแผน">Reference current directions</span></div>
+          <div id="circuit-controls"></div>
+        </section>
+        <div class="sidebar">
+          <section class="panel parameters" aria-labelledby="parameters-heading">
+            <header class="panel-heading"><h2 id="parameters-heading" data-th="ค่าที่กรอก">Inputs</h2><button id="practice-toggle" class="button-secondary" type="button" aria-pressed="false" hidden>Practice</button></header>
+            <form id="bias-form" method="post" action="/calculate" novalidate>
+              <input type="hidden" id="bias-mode" name="mode" value="{{ mode }}">
+              <div id="fields" class="field-list">
+                {% for key, (label, unit) in fields.items() %}
+                {{ parameter(key, label, unit, form.get(key, ''), errors.get(key, '')) }}
+                {% endfor %}
+              </div>
+              <p id="input-alert" class="field-error form-alert" role="alert"{% if not errors %} hidden{% endif %}>Input error. Check the highlighted fields or mode.</p>
+              <div class="actions">
+                <button type="submit" class="button-primary" data-th="คำนวณ">Calculate</button>
+                <a id="reset-button" href="/" class="button-secondary" data-th="คืนค่าเดิม">Reset</a>
+              </div>
+            </form>
+          </section>
+          <section class="panel results" aria-labelledby="results-heading">
+            <header class="panel-heading"><h2 id="results-heading" data-th="จุดทำงาน DC">DC operating point</h2><small>Python</small></header>
+            <div class="qpoint">
+              <div><small data-th="กระแสคอลเลกเตอร์">Collector current</small><strong data-result-key="IC_A">{{ readings.get('IC_A', '—') }}</strong></div>
+              <div><small data-th="แรงดัน C–E">Collector–emitter voltage</small><strong data-result-key="VCE_V">{{ readings.get('VCE_V', '—') }}</strong></div>
             </div>
-            <span class="panel-icon" aria-hidden="true">≡</span>
-          </div>
-          <p class="panel-description">Set the supply, resistor network and transistor assumptions.</p>
-          <form action="{{ url_for('calculate_html') }}" method="post" id="bias-form" novalidate>
-            <div class="parameter-grid">
-              {% for key, label in fields.items() %}
-              <div class="parameter-item{% if errors.get(key) %} has-error{% endif %}">
-                <label for="{{ key }}">
-                  <span>{{ label[0] }}</span>
-                  <span class="unit-label">{{ label[1] if label[1] else 'ratio' }}</span>
-                </label>
-                <input
-                  id="{{ key }}" name="{{ key }}" type="text" inputmode="decimal"
-                  value="{{ form[key] }}" autocomplete="off" spellcheck="false"
-                  aria-describedby="error-{{ key }}"{% if errors.get(key) %} aria-invalid="true"{% endif %}
-                >
-                <small id="error-{{ key }}" class="field-error" data-error-key="{{ key }}">{{ errors.get(key, '') }}</small>
+            <table class="result-table" aria-label="DC readings">
+              <tbody>
+                {% for key, label in result_labels.items() if key in ('VB_V','VE_V','VC_V') %}
+                <tr>
+                  <th scope="row" data-th="{{ result_labels_th[key] }}">{{ label }}</th><td data-result-key="{{ key }}">{{ readings.get(key, '—') }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            <details class="aux-details additional-readings">
+              <summary data-th="ดูค่ากระแสและวงจรสมมูล">More readings</summary>
+              <table class="result-table" aria-label="Additional DC readings" data-th-label="ค่าจุดทำงานเพิ่มเติม"><tbody>
+                {% for key, label in result_labels.items() if key in ('IB_A','IE_A','VTH_V','RTH_OHM') %}
+                <tr{% if key in ('VTH_V','RTH_OHM') %} data-divider-only{% if mode != 'divider' %} hidden{% endif %}{% endif %}>
+                  <th scope="row" data-th="{{ result_labels_th[key] }}">{{ label }}</th><td data-result-key="{{ key }}">{{ readings.get(key, '—') }}</td>
+                </tr>
+                {% endfor %}
+              </tbody></table>
+            </details>
+            <p class="model-description" id="model-description">{{ state.model or '' }}</p>
+            <ul class="warnings" id="warning-list" aria-live="polite"{% if not state.warnings %} hidden{% endif %}>
+              {% for warning in state.warnings or [] %}<li>{{ warning }}</li>{% endfor %}
+            </ul>
+            <details class="aux-details" id="comparison-disclosure" hidden>
+              <summary data-th="เทียบกับกรณีอ้างอิง">Compare with a saved case</summary>
+              <p class="comparison-scroll-hint" data-th="เลื่อนในกรอบเพื่อดูผลต่างทั้งหมด">Scroll this panel to see all differences.</p>
+              <div id="comparison-tools" role="region" aria-label="Saved-case comparison" data-th-label="ผลเทียบกับกรณีอ้างอิง" tabindex="0"></div>
+            </details>
+            <section class="practice-panel" id="practice-panel" hidden aria-labelledby="practice-title">
+              <h3 id="practice-title" data-th="ลองทำก่อนเปิดเฉลย">Try it before seeing the answer</h3>
+              <p id="practice-prompt"></p>
+              <div class="practice-values"><label>I<sub>C</sub> (mA)<input type="number" step="any" inputmode="decimal" id="guess-ic"></label><label>V<sub>CE</sub> (V)<input type="number" step="any" inputmode="decimal" id="guess-vce"></label></div>
+              <button id="practice-next" type="button" class="button-secondary">Show hint</button>
+              <p id="practice-feedback" role="status" hidden></p>
+            </section>
+          </section>
+        </div>
+        <section class="panel manual" aria-labelledby="manual-heading">
+          <header class="panel-heading"><h2 id="manual-heading" data-th="คำนวณมือและเทียบผล">Worked calculation and comparison</h2></header>
+          <div class="manual-content">
+            <p id="comparison-status" class="comparison-status" data-state="{{ calc.state or 'unavailable' }}" role="status">{{ comparison_text.get(calc.state, 'Comparison unavailable') }}</p>
+            <p id="manual-message" class="manual-intro"{% if not calc.reason %} hidden{% endif %}>{{ calc.reason or '' }}</p>
+            <section id="diagnostics" class="diagnostics"{% if not state.diagnostics %} hidden{% endif %}>
+              <h3 data-th="เงื่อนไขที่ไม่ผ่าน · ผลทดลอง Forward Active">Failed conditions · Forward-active trial</h3>
+              <ul id="diagnostic-rows">{% for row in state.diagnostics or [] %}<li>{{ row.key|upper }} = {{ '%.6g'|format(row.lhs) }} {{ row.unit }} (requires {{ row.operator }} {{ row.rhs }} {{ row.unit }})</li>{% endfor %}</ul>
+              <button type="button" id="diagnostic-trace" data-trace="junction" class="button-secondary" data-th="ดูขาบนรูปวงจร" hidden>Locate junction on circuit</button>
+            </section>
+            <div id="manual-summary" class="manual-summary"{% if not comparison %} hidden{% endif %}>
+              {% for row in comparison if row.key in ('IC_A', 'VCE_V') %}
+              <div class="summary-card" data-comparison="{{ row.state }}">
+                <h3>{{ row.label }}</h3><dl><div><dt>Hand calculation</dt><dd>{{ row.manual }}</dd></div><div><dt>Python solver</dt><dd>{{ row.actual }}</dd></div></dl>
               </div>
               {% endfor %}
             </div>
-            <div class="form-actions">
-              <button class="primary-button" type="submit">Calculate operating point <span aria-hidden="true">↗</span></button>
-              <a class="reset-button" id="reset-button" href="{{ url_for('index') }}">Reset</a>
-            </div>
-          </form>
-          <p class="form-note">Resistance inputs use <strong>kΩ</strong>. Calculations use Ω and A internally.</p>
-          <noscript><p class="noscript-note">Live updates need JavaScript. The Calculate button still works normally.</p></noscript>
-          <p id="input-alert" class="input-alert" role="alert"{% if not errors %} hidden{% endif %}>Input error: Check the highlighted fields.</p>
-        </section>
-
-        <section class="panel circuit-panel" aria-labelledby="circuit-title">
-          <div class="panel-heading circuit-heading">
-            <div>
-              <p class="section-index">02 / SCHEMATIC</p>
-              <h2 id="circuit-title">NPN voltage-divider bias</h2>
-            </div>
-            <span class="diagram-tag">DC · Q-POINT</span>
+            <details id="manual-details" class="manual-details"{% if not calc.steps and not comparison and not checks %} hidden{% endif %}>
+              <summary data-th="ดูสูตรและผลเทียบทั้งหมด">View all formulas and comparisons</summary>
+              <div class="details-grid">
+                <section class="panel reference-circuit" aria-labelledby="reference-heading">
+                  <header class="panel-heading"><h3 id="reference-heading" data-th="วงจรประกอบสูตร">Reference circuit</h3><small class="mode-label">{{ modes[mode] }}</small></header>
+                  <div id="reference-diagram" class="schematic">{{ schematic(mode,'reference-schematic',schematic_inputs,readings) }}</div>
+                  {{ reading_strip(readings) }}
+                  <div id="reference-controls"></div>
+                </section>
+                <section class="worked-calculation" tabindex="0" aria-label="Worked calculations and comparison" data-th-label="ขั้นคำนวณและผลเทียบ">
+                  <p class="mobile-scroll-hint" data-th="เลื่อนอ่านสูตรในกรอบนี้">Scroll this panel to read the formulas.</p>
+                  <ol id="steps" class="calc-steps">
+                    {% for step in calc.steps or [] %}
+                    <li data-formula="{{ step.id }}"><strong>{{ step.formula }}</strong><p class="step-value"><span>{{ step.substitution }}</span><b>{{ step.result }}</b></p></li>
+                    {% endfor %}
+                  </ol>
+                  <table id="comparison" class="comparison"{% if not comparison %} hidden{% endif %}>
+                    <caption data-th="เทียบค่าจุดทำงาน DC">Compare readings</caption>
+                    <thead><tr><th scope="col" data-th="ค่า">Quantity</th><th scope="col" data-th="คำนวณมือ">Hand</th><th scope="col" data-th="โปรแกรม">Solver</th></tr></thead>
+                    <tbody id="comparison-rows">
+                      {% for row in comparison %}
+                      <tr data-comparison="{{ row.state }}"><th scope="row">{{ row.label }}</th><td>{{ row.manual }}</td><td>{{ row.actual }}</td></tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                  <section id="verification"{% if not checks %} hidden{% endif %}>
+                    <h3 data-th="ตรวจสมการและเขตการทำงาน">Engineering checks</h3>
+                    <ul id="circuit-checks" class="check-list">
+                      {% for check in checks %}
+                      <li data-check-key="{{ check.key }}"><span>{{ check.label }}</span><strong data-check-state="{{ check.state }}">{{ engineering_text[check.state] }}</strong></li>
+                      {% endfor %}
+                    </ul>
+                  </section>
+                </section>
+              </div>
+            </details>
           </div>
-          <div class="diagram-toolbar">
-            <span><span class="legend-swatch legend-wire" aria-hidden="true"></span> Circuit connection</span>
-            <span><span class="legend-swatch legend-value" aria-hidden="true"></span> Calculated value</span>
-            <span><span class="legend-swatch legend-current" aria-hidden="true"></span> Conventional current</span>
-          </div>
-          <p class="mobile-pan-hint"><span aria-hidden="true">↔</span> Swipe horizontally to inspect the complete circuit.</p>
-          <div class="schematic-scroll" aria-label="Scrollable circuit drawing on small screens">
-            <svg
-              id="bias-schematic" class="bias-schematic"
-              xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 580"
-              preserveAspectRatio="xMidYMid meet" role="img"
-              aria-labelledby="schematic-svg-title schematic-svg-desc"
-            >
-              <title id="schematic-svg-title">NPN transistor with voltage-divider DC bias</title>
-              <desc id="schematic-svg-desc">R1 connects VCC to base; R2 connects base to ground; RC connects VCC to collector; RE connects emitter to ground. The emitter arrow points outward, indicating an NPN transistor. Values update from the server calculation.</desc>
-              <defs>
-                <marker id="npn-emitter-arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto" markerUnits="userSpaceOnUse">
-                  <path d="M0 0 L7 4 L0 8 Z" fill="#f9bd70"/>
-                </marker>
-                <marker id="current-arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto" markerUnits="userSpaceOnUse">
-                  <path d="M0 0 L7 4 L0 8 Z" fill="#f9bd70"/>
-                </marker>
-              </defs>
-
-              <!-- One continuous VCC rail, split through each physical resistor. -->
-              <g class="circuit-wires" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M160 98 H575 M220 98 V165 M220 245 V348 H428 M220 348 V400 M220 472 V512"/>
-                <path d="M575 98 V165 M575 245 V286 H490"/>
-                <path d="M490 420 H575 V438 M575 484 V512 M220 512 H575"/>
-                <path d="M398 512 V529"/>
-              </g>
-
-              <!-- IEC-style resistor blocks. These SVG elements remain perfectly sharp at zoom. -->
-              <g class="resistor-symbols">
-                <rect x="206" y="165" width="28" height="80" rx="3"/>
-                <rect x="206" y="400" width="28" height="72" rx="3"/>
-                <rect x="561" y="165" width="28" height="80" rx="3"/>
-                <rect x="561" y="438" width="28" height="46" rx="3"/>
-              </g>
-
-              <!-- A single common ground reference for R2 and RE. -->
-              <g class="ground-symbol" stroke-linecap="round">
-                <path d="M378 529 H418 M385 535 H411 M393 541 H403"/>
-              </g>
-
-              <!-- Base, collector, emitter transistor leads and outward NPN arrow. -->
-              <circle class="transistor-housing" cx="450" cy="356" r="73"/>
-              <g class="transistor-leads">
-                <path d="M428 325 V389"/>
-                <path d="M440 338 L490 286"/>
-                <path d="M440 372 L490 420" marker-end="url(#npn-emitter-arrow)"/>
-              </g>
-              <g class="circuit-junctions">
-                <circle cx="220" cy="98" r="5"/><circle cx="575" cy="98" r="5"/>
-                <circle cx="220" cy="348" r="5"/><circle cx="575" cy="286" r="5"/>
-                <circle cx="575" cy="420" r="5"/>
-              </g>
-
-              <!-- Conventional current directions, not electronic flow. -->
-              <g class="current-flow">
-                <path d="M331 320 H384" marker-end="url(#current-arrow)"/>
-                <path d="M660 310 V364" marker-end="url(#current-arrow)"/>
-                <path d="M660 435 V489" marker-end="url(#current-arrow)"/>
-              </g>
-              <g class="current-captions">
-                <text x="331" y="277">I<tspan baseline-shift="sub" font-size="12">B</tspan></text>
-                <text x="676" y="341">I<tspan baseline-shift="sub" font-size="12">C</tspan></text>
-                <text x="676" y="465">I<tspan baseline-shift="sub" font-size="12">E</tspan></text>
-              </g>
-
-              <!-- Resistances and assumptions come from the current form inputs. -->
-              <g class="component-labels">
-                <text x="248" y="181">R1</text>
-                <text x="248" y="201" class="component-number"><tspan data-input-key="r1">{{ form['r1'] }}</tspan> kΩ</text>
-                <text x="248" y="422">R2</text>
-                <text x="248" y="442" class="component-number"><tspan data-input-key="r2">{{ form['r2'] }}</tspan> kΩ</text>
-                <text x="606" y="181">RC</text>
-                <text x="606" y="201" class="component-number"><tspan data-input-key="rc">{{ form['rc'] }}</tspan> kΩ</text>
-                <text x="606" y="451">RE</text>
-                <text x="606" y="470" class="component-number"><tspan data-input-key="re">{{ form['re'] }}</tspan> kΩ</text>
-                <text x="145" y="75" class="supply-caption">VCC</text>
-                <text x="199" y="75" class="supply-number"><tspan data-input-key="vcc">{{ form['vcc'] }}</tspan> V</text>
-                <text x="403" y="264" class="transistor-caption">Q1 · NPN</text>
-                <text x="376" y="455" class="component-number">β <tspan data-input-key="beta">{{ form['beta'] }}</tspan> · VBE <tspan data-input-key="vbe">{{ form['vbe'] }}</tspan> V</text>
-              </g>
-              <g class="terminal-labels">
-                <text x="405" y="320">B</text>
-                <text x="496" y="278">C</text>
-                <text x="495" y="442">E</text>
-              </g>
-
-              <!-- Each output is copied verbatim from the Python-calculated display map. -->
-              <g class="diagram-measurements">
-                <text class="measure-key" x="295" y="363">V<tspan baseline-shift="sub" font-size="12">B</tspan></text>
-                <text class="measure-value" x="295" y="383" data-result-key="VB_V">{{ display.get('VB_V', '—') }}</text>
-                <text class="measure-key" x="605" y="260">V<tspan baseline-shift="sub" font-size="12">C</tspan></text>
-                <text class="measure-value" x="605" y="280" data-result-key="VC_V">{{ display.get('VC_V', '—') }}</text>
-                <text class="measure-key" x="509" y="373">V<tspan baseline-shift="sub" font-size="12">E</tspan></text>
-                <text class="measure-value" x="509" y="394" data-result-key="VE_V">{{ display.get('VE_V', '—') }}</text>
-                <text class="measure-key" x="331" y="546">V<tspan baseline-shift="sub" font-size="12">CE</tspan></text>
-                <text class="measure-value" x="331" y="566" data-result-key="VCE_V">{{ display.get('VCE_V', '—') }}</text>
-                <text class="measure-value current-value" x="325" y="299" data-result-key="IB_A">{{ display.get('IB_A', '—') }}</text>
-                <text class="measure-value current-value" x="672" y="384" data-result-key="IC_A">{{ display.get('IC_A', '—') }}</text>
-                <text class="measure-value current-value" x="672" y="510" data-result-key="IE_A">{{ display.get('IE_A', '—') }}</text>
-              </g>
-            </svg>
-          </div>
-          <p class="schematic-footnote"><span class="footnote-marker" aria-hidden="true">↗</span> Equivalent DC-bias model · The transistor drawing and values are vector-rendered, not a simulated component image.</p>
         </section>
       </div>
+      <div class="tools-grid">
+        <details class="panel tool-card" id="experiment-disclosure" hidden><summary><span data-th="ทดลองกับวงจร">Explore the circuit</span><small data-th="กวาดค่า · หาตัวต้านทานจากเป้าหมาย">Parameter sweep · target resistor</small></summary><div class="tool-content" id="experiment-tools"></div></details>
+        <details class="panel tool-card" id="record-disclosure" hidden><summary><span data-th="ค่าที่วัดจริงและรายงาน">Measurements and report</span><small data-th="กรอกค่าที่วัด · พิมพ์ PDF">Enter readings · print PDF</small></summary><div class="tool-content" id="record-tools"></div></details>
+      </div>
+    </div>
+  </article>
+  {% for key in modes %}
+  <template id="schematics-{{ key }}">{{ schematic(key,'bias-schematic',{}, {}) }}{{ schematic(key,'reference-schematic',{}, {}) }}</template>
+  {% endfor %}
+  <template id="parameter-template">{{ parameter('field', '', '', '', '') }}</template>
+</main>
+<script>
+(() => {
+  const byId = id => document.getElementById(id);
+  const form = byId('bias-form');
+  const select = byId('mode');
+  const activeMode = byId('bias-mode');
+  const example = byId('example');
+  const details = byId('manual-details');
+  const defaults = {{ mode_defaults|tojson }};
+  const modeFields = {{ mode_fields|tojson }};
+  const labels = {{ all_fields|tojson }};
+  const modes = {{ modes|tojson }};
+  const regions = {{ regions|tojson }};
+  const comparisons = {{ comparison_text|tojson }};
+  const engineering = {{ engineering_text|tojson }};
+  const cases = {{ presets|tojson }};
+  const resistanceBounds = {{ resistance_bounds|tojson }};
+  const initial = {{ state|tojson }};
+  const caseNames = {A1:'Divider',A2:'Fixed',A3:'RE 1 kΩ',A4:'RE 2 kΩ',A5:'RB 0 kΩ'};
+  const names = {vcc:'VCC',rc:'RC',beta:'β',vbe:'VBE',r1:'R1',r2:'R2',rb:'RB',re:'RE'};
+  const keys = {VB_V:'VB',VE_V:'VE',VC_V:'VC',VCE_V:'VCE',IB_A:'IB',IC_A:'IC',IE_A:'IE',VTH_V:'VTH',RTH_OHM:'RTH'};
+  const scale = {IB_A:1e6,IC_A:1e3,IE_A:1e3,RTH_OHM:1e-3};
+  const units = {VB:'V',VE:'V',VC:'V',VCE:'V',VTH:'V',RTH:'kΩ',IB:'µA',IC:'mA',IE:'mA'};
+  const trace = {vth:'divider_network',rth:'divider_network',base_kvl:'base',ib:'base',ic:'collector',gain:'gain',transistor_kcl:'transistor',
+    ve:'emitter',vb:'vbe',vbe_identity:'vbe',vc:'collector_drop',vce:'vce',divider_kcl:'divider',
+    collector_kvl:'collector',saturation_constraint:'vce',cutoff_currents:'transistor',
+    collector_drop:'collector_drop',emitter_ground:'emitter',emitter_drop:'emitter',vce_identity:'vce'};
+  const thaiRegions = {forward_active:'Forward Active',cutoff_estimate:'Cutoff · ค่าประมาณ',saturation_estimate:'Saturation · ค่าประมาณ',
+    outside_model:'นอกขอบเขตแบบจำลอง',invalid:'ตรวจอินพุต',pending:'รอผลคำนวณ',unavailable:'ผลไม่พร้อม',mismatch:'จุดทำงานยังยืนยันไม่ได้'};
+  const thaiChecks = {transistor_kcl:'KCL ที่ทรานซิสเตอร์',divider_kcl:'KCL ที่โหนดฐาน',base_kvl:'KVL รอบฐานและ VBE',collector_kvl:'KVL รอบคอลเลกเตอร์',
+    collector_drop:'แรงดันตกคร่อม RC',emitter_ground:'อิมิตเตอร์ลงกราวด์',emitter_drop:'แรงดันตกคร่อม RE',vce_identity:'ความสัมพันธ์ VCE',region_consistency:'เงื่อนไขเขตการทำงาน'};
+  const phrases = new Map([
+    ['The unrounded reference and solver values agree within numerical tolerance.','ผลสองวิธีสอดคล้องกันตามความละเอียดที่ตรวจ'],
+    ['The unrounded reference and solver values differ beyond the numerical tolerance.','ผลสองวิธีต่างกันเกินเกณฑ์ที่ใช้เทียบ'],
+    ['No valid comparison is available for every operating-point quantity in this model state.','แบบจำลองสถานะนี้ให้ค่าเพื่อเทียบจุดทำงานได้ไม่ครบ'],
+    ['Waiting for valid current inputs.','รออินพุตที่ใช้คำนวณได้'],
+    ['Fixed-beta forward-active approximation','แบบจำลอง Forward Active ที่ใช้ β คงที่'],
+    ['No consistent DC bias estimate','ประเมินจุดทำงาน DC ที่สอดคล้องไม่ได้'],
+    ['Cutoff estimate (leakage neglected)','ค่าประมาณ Cutoff แบบละเลยกระแสรั่ว'],
+    ['Saturation estimate: fixed VCE(sat)=0.20 V, fixed VBE','ค่าประมาณ Saturation ใช้ VCE(sat)=0.20 V และ VBE คงที่'],
+    ['Outside the forward-active and bounded saturation approximations.','อยู่นอกขอบเขต Forward Active และ Saturation ที่แบบจำลองรองรับ'],
+    ['Cutoff estimate: leakage and breakdown are not modeled.','ค่าประมาณ Cutoff ละเลยกระแสรั่วและ breakdown'],
+    ['Saturation estimate only; not a SPICE or device-curve solution.','ค่าประมาณ Saturation จากแบบจำลองของใบงาน'],
+    ['Forward-active bias requires positive IB and IC, VC > VB, and VCE > 0.20 V.','Forward Active ต้องมี IB และ IC เป็นบวก, VC > VB และ VCE > 0.20 V'],
+    ['Engineering consistency check failed; no reliable Q-point.','ตรวจสมการไม่ผ่าน จึงประเมินจุดทำงานไม่ได้'],
+    ['Positive bias current underflow at this scale; no reliable Q-point.','กระแสที่เป็นบวกเล็กเกินกว่าความละเอียดของตัวคำนวณ จึงประเมินจุดทำงานไม่ได้'],
+    ['The forward-active voltage margin is below numerical resolution; no reliable Q-point.','ส่วนต่างแรงดันที่รอยต่อเล็กเกินกว่าความละเอียดของตัวคำนวณ จึงประเมินจุดทำงานไม่ได้'],
+    ['Input validation failed.','อินพุตไม่อยู่ในช่วงที่รองรับ'],
+    ['Enter a finite numeric value.','กรอกตัวเลขที่มีค่าจำกัด'],
+    ['Enter a finite number.','กรอกตัวเลขที่มีค่าจำกัด'],
+    ['Enter values and calculate the selected circuit.','กรอกค่าแล้วกดคำนวณวงจรที่เลือก'],
+    ['Calculating the current inputs…','กำลังคำนวณค่าปัจจุบัน…'],
+    ['Live calculation is unavailable. Use Calculate to submit the form.','คำนวณแบบสดไม่ได้ กดคำนวณเพื่อส่งฟอร์ม'],
+    ['Emitter is wired directly to ground.','ขาอิมิตเตอร์ต่อลงกราวด์โดยตรง'],
+    ['Loop balance','สมดุลแรงดันรอบวง'], ['Loaded base-node balance','สมดุลกระแสที่โหนดฐาน'],
+    ['Open transistor approximation in DC.','แบบจำลอง DC ที่ถือว่าทรานซิสเตอร์เปิดวงจร'],
+    ['Cutoff estimate; base-emitter conduction and leakage are omitted.','ค่าประมาณ Cutoff ละเลยการนำกระแส B–E และกระแสรั่ว'],
+    ['Fixed VCE(sat) educational approximation.','ใช้ VCE(sat) คงที่ในแบบจำลองใบงาน'],
+    ['Forward-active approximation','ค่าประมาณในเขต Forward Active'], ['Bounded saturation estimate','ค่าประมาณ Saturation ในช่วงที่รองรับ'],
+  ]);
+  const staticText = [...document.querySelectorAll('[data-th],[data-th-label]')].map(node=>[node,node.textContent,node.getAttribute('aria-label')]);
+  let locale = 'en', practice = 'off', shown = initial, current;
+  let timer, controller, revision = 0;
 
-      <section class="readout-section" aria-labelledby="results-title">
-        <div class="readout-header">
-          <div>
-            <p class="section-index">03 / OPERATING POINT</p>
-            <h2 id="results-title">Calculated results</h2>
-          </div>
-          <div id="live-status" class="live-status" aria-live="polite" aria-atomic="true"><span class="status-dot" aria-hidden="true"></span><span id="status-text">{% if errors %}Check inputs{% else %}Calculated by Python{% endif %}</span></div>
-        </div>
-        <div class="readout-layout">
-          <div class="result-group">
-            <h3 class="group-heading">Node voltages <span>V</span></h3>
-            <div class="results-grid voltages-grid">
-              {% for key in ('VB_V', 'VE_V', 'VC_V', 'VCE_V') %}
-              <article class="result-card">
-                <span class="result-label">{{ result_labels[key] }}</span>
-                <output class="result-value" data-result-key="{{ key }}">{{ display.get(key, '—') }}</output>
-              </article>
-              {% endfor %}
-            </div>
-          </div>
-          <div class="result-group">
-            <h3 class="group-heading">Branch currents <span>A</span></h3>
-            <div class="results-grid current-grid">
-              {% for key in ('IB_A', 'IC_A', 'IE_A') %}
-              <article class="result-card">
-                <span class="result-label">{{ result_labels[key] }}</span>
-                <output class="result-value" data-result-key="{{ key }}">{{ display.get(key, '—') }}</output>
-              </article>
-              {% endfor %}
-            </div>
-          </div>
-          <div class="result-group equivalent-group">
-            <h3 class="group-heading">Thevenin equivalent <span>DC</span></h3>
-            <div class="results-grid equivalent-grid">
-              {% for key in ('VTH_V', 'RTH_OHM') %}
-              <article class="result-card secondary-card">
-                <span class="result-label">{{ result_labels[key] }}</span>
-                <output class="result-value" data-result-key="{{ key }}">{{ display.get(key, '—') }}</output>
-              </article>
-              {% endfor %}
-            </div>
-          </div>
-        </div>
-      </section>
+  const text = (th,en) => locale === 'th' ? th : en;
+  const regionText = region => text(thaiRegions[region] || 'ผลไม่พร้อม',regions[region] || (region === 'mismatch' ? 'Unconfirmed operating point' : 'Unavailable'));
+  const translate = value => {
+    if (locale === 'en' || !value) return value || '';
+    const bounds = value.match(/^Choose a resistance from (\S+) to (\S+) kΩ\.$/);
+    if (bounds) return `กรอกค่าความต้านทานระหว่าง ${bounds[1]} ถึง ${bounds[2]} kΩ`;
+    const scalar = value.match(/^Must be (at least|greater than) (\S+) and at most (\S+)\.$/);
+    if (scalar) return `กรอกค่า${scalar[1] === 'at least' ? 'ตั้งแต่' : 'มากกว่า'} ${scalar[2]} และไม่เกิน ${scalar[3]}`;
+    return phrases.get(value) ?? value.replace(/ using V and kΩ$/, ' ใช้หน่วย V และ kΩ');
+  };
+  const inputKey = key => Object.keys(names).find(name=>names[name] === key);
+  const unitsFor = key => units[key] ?? labels[inputKey(key)]?.[1] ?? '';
+  const fields = mode => modeFields[mode].map(key=>names[key]);
+  const rawValues = () => Object.fromEntries(new FormData(form));
+  const format = (key,value) => {
+    if (!Number.isFinite(value)) return '—';
+    const number = !units[key] ? Number(value.toPrecision(7)).toString()
+      : value !== 0 && Math.abs(value)<0.0005 ? value.toExponential(3) : value.toFixed(3);
+    return [number,unitsFor(key)].filter(Boolean).join(' ');
+  };
+  const unpack = data => Object.fromEntries(Object.entries(data || {}).filter(([key,value])=>keys[key] && Number.isFinite(value)).map(([key,value])=>[keys[key],value*(scale[key] ?? 1)]));
 
-      <section class="verification-panel panel" aria-labelledby="validation-title">
-        <div class="panel-heading">
-          <div>
-            <p class="section-index">04 / ENGINEERING VERIFICATION</p>
-            <h2 id="validation-title">Model integrity</h2>
-          </div>
-          <span id="region-badge" class="region-badge" data-region="{{ point.region if point else 'invalid' }}">{{ point.region|replace('_', ' ')|title if point else 'Input invalid' }}</span>
-        </div>
-        <p id="model-description" class="model-description">{{ point.model if point else 'Waiting for valid input.' }}</p>
-        {% set check_labels = {
-          'transistor_kcl': 'Transistor KCL',
-          'divider_kcl': 'Divider KCL',
-          'collector_drop': 'Collector resistor drop',
-          'emitter_drop': 'Emitter resistor drop',
-          'vce_identity': 'VCE voltage identity',
-          'region_consistency': 'Operating-region consistency'
-        } %}
-        <ul class="checks-grid" id="check-list">
-          {% for key, label in check_labels.items() %}
-          <li class="check-item">
-            <span class="check-icon" aria-hidden="true">✓</span>
-            <span>{{ label }}</span>
-            <strong class="check-state" data-check-key="{{ key }}">{% if point %}{{ 'PASS' if point.checks[key] else 'FAIL' }}{% else %}—{% endif %}</strong>
-          </li>
-          {% endfor %}
-        </ul>
-        <ul class="warning-list" id="warning-list" aria-live="polite">{% if point %}{% for warning in point.warnings %}<li>{{ warning }}</li>{% endfor %}{% endif %}</ul>
-        <p class="model-note">Educational fixed-β / fixed-VBE analysis. Cutoff and saturation are approximate operating-region estimates, not SPICE or measured device behavior.</p>
-      </section>
-    </main>
+  function element(tag,value) {
+    const node = document.createElement(tag);
+    if (value !== undefined) node.textContent = value;
+    return node;
+  }
 
-    <footer class="site-footer"><span>BJT DC BIAS · LAB 02</span><span>Physics-led calculations · Responsive SVG</span></footer>
-  </div>
+  function traced(label,key) {
+    if (!trace[key]) return element('strong',label);
+    const button = element('button',label);
+    button.type = 'button';
+    button.className = 'formula-trigger';
+    button.dataset.trace = trace[key];
+    return button;
+  }
 
-  <script>
-    (() => {
-      "use strict";
-      const form = document.getElementById("bias-form");
-      const statusText = document.getElementById("status-text");
-      const statusBox = document.getElementById("live-status");
-      const regionBadge = document.getElementById("region-badge");
-      const modelDescription = document.getElementById("model-description");
-      const warningList = document.getElementById("warning-list");
-      const inputAlert = document.getElementById("input-alert");
-      const defaults = {{ default_form | tojson }};
-      const names = Object.keys(defaults);
-      let timer = null;
-      let sequence = 0;
-      let controller = null;
+  function renderErrors(errors) {
+    for (const input of byId('fields').querySelectorAll('input')) {
+      const message = errors[input.name];
+      byId('error-'+input.name).textContent = translate(message);
+      input.closest('.field').classList.toggle('has-error',Boolean(message));
+      if (message) input.setAttribute('aria-invalid','true');
+      else input.removeAttribute('aria-invalid');
+    }
+    byId('mode-error').textContent = translate(errors.mode);
+    if (errors.mode) select.setAttribute('aria-invalid','true');
+    else select.removeAttribute('aria-invalid');
+    const alert = byId('input-alert');
+    alert.hidden = !Object.keys(errors).length;
+    alert.textContent = translate(errors.request) || text('ตรวจช่องอินพุตที่เน้นไว้','Input error. Check the highlighted fields or mode.');
+  }
 
-      const currentValues = () => Object.fromEntries(
-        names.map(name => [name, form.elements.namedItem(name).value])
-      );
-      const setStatus = (state, message) => {
-        statusBox.dataset.state = state;
-        statusText.textContent = message;
-      };
-      const setMeasurements = (display) => {
-        document.querySelectorAll("[data-result-key]").forEach(element => {
-          element.textContent = display[element.dataset.resultKey] ?? "—";
-        });
-      };
-      const syncComponentLabels = (values) => {
-        document.querySelectorAll("[data-input-key]").forEach(element => {
-          element.textContent = values[element.dataset.inputKey] ?? "—";
-        });
-      };
-      const clearErrors = () => {
-        names.forEach(name => {
-          const element = form.elements.namedItem(name);
-          element.removeAttribute("aria-invalid");
-          element.closest(".parameter-item").classList.remove("has-error");
-          document.querySelector('[data-error-key="' + name + '"]').textContent = "";
-        });
-        inputAlert.hidden = true;
-      };
-      const showErrors = (errors) => {
-        clearErrors();
-        for (const [name, message] of Object.entries(errors || {})) {
-          if (!names.includes(name)) continue;
-          const element = form.elements.namedItem(name);
-          element.setAttribute("aria-invalid", "true");
-          element.closest(".parameter-item").classList.add("has-error");
-          document.querySelector('[data-error-key="' + name + '"]').textContent = String(message);
-        }
-        inputAlert.textContent = "Input error: Check the highlighted fields.";
-        inputAlert.hidden = false;
-      };
-      const renderChecks = (checks) => {
-        document.querySelectorAll("[data-check-key]").forEach(element => {
-          const valid = checks?.[element.dataset.checkKey];
-          element.textContent = valid === undefined ? "—" : valid ? "PASS" : "FAIL";
-          element.dataset.checkState = valid === undefined ? "unknown" : valid ? "pass" : "fail";
-        });
-      };
-      const renderWarnings = (warnings) => {
-        warningList.replaceChildren();
-        for (const warning of warnings || []) {
-          const item = document.createElement("li");
-          item.textContent = warning;
-          warningList.appendChild(item);
-        }
-      };
-      const renderRegion = (region, model) => {
-        regionBadge.dataset.region = region;
-        regionBadge.textContent = region.replaceAll("_", " ");
-        modelDescription.textContent = model;
-      };
-      const invalidateReadout = () => {
-        setMeasurements({});
-        renderChecks({});
-        renderWarnings([]);
-        renderRegion("pending", "Awaiting the current inputs.");
-      };
+  function symbolicSteps(mode) {
+    const divider = mode === 'divider', emitter = mode !== 'fixed';
+    const steps = divider ? [['vth','V_TH = V_CC × R₂ / (R₁ + R₂)'],['rth','R_TH = R₁ × R₂ / (R₁ + R₂)']] : [];
+    steps.push(['base_kvl',`${divider ? 'V_TH = I_B × R_TH' : 'V_CC = I_B × R_B'} + V_BE${emitter ? ' + I_E × R_E' : ''}`],
+      ['ic','I_C = β × I_B'],['transistor_kcl','I_E = I_B + I_C'],['ve',emitter ? 'V_E = I_E × R_E' : 'V_E = 0'],
+      ['vb','V_B = V_E + V_BE'],['vc','V_C = V_CC − I_C × R_C'],['vce','V_CE = V_C − V_E']);
+    return steps.map(([id,formula])=>({id,formula}));
+  }
 
-      const calculate = async (ticket) => {
-        const active = new AbortController();
-        controller = active;
-        setStatus("calculating", "Calculating…");
-        try {
-          const response = await fetch({{ url_for('calculate_json') | tojson }}, {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify(currentValues()),
-            signal: active.signal
-          });
-          const data = await response.json();
-          if (ticket !== sequence) return;
-          if (!response.ok || !data.ok) {
-            showErrors(data.errors);
-            renderRegion("invalid", "Input validation failed. No operating point is shown.");
-            setStatus("error", "Check inputs");
-            return;
-          }
-          clearErrors();
-          setMeasurements(data.display || {});
-          renderChecks(data.checks || {});
-          renderWarnings(data.warnings || []);
-          renderRegion(data.region, data.model);
-          setStatus("ready", "Updated by Python");
-        } catch (error) {
-          if (ticket !== sequence || error.name === "AbortError") return;
-          renderRegion("unavailable", "Unable to reach the calculation server.");
-          setStatus("error", "Connection error");
-          inputAlert.textContent = "The calculation server is unavailable. You can still use the Calculate button to submit the form.";
-          inputAlert.hidden = false;
-        } finally {
-          if (controller === active) controller = null;
-        }
-      };
-      const schedule = () => {
-        const ticket = ++sequence;
-        window.clearTimeout(timer);
-        controller?.abort();
-        controller = null;
-        clearErrors();
-        invalidateReadout();
-        syncComponentLabels(currentValues());
-        setStatus("pending", "Waiting for input…");
-        timer = window.setTimeout(() => calculate(ticket), 350);
-      };
+  function renderCalculation(calc, checks, hidden) {
+    const steps = hidden ? practice === 'steps' ? symbolicSteps(activeMode.value) : [] : calc.steps || [];
+    const rows = hidden ? [] : calc.comparison || [];
+    const verdict = byId('comparison-status');
+    const messages = {match:'ผลเทียบสอดคล้องตามความละเอียดที่ตรวจ',different:'ผลสองวิธีแตกต่างกัน',unavailable:'ผลเทียบประเมินไม่ได้'};
+    verdict.dataset.state = calc.state || 'unavailable';
+    verdict.hidden = hidden;
+    verdict.textContent = text(messages[calc.state] || messages.unavailable,comparisons[calc.state] || comparisons.unavailable);
+    const message = byId('manual-message');
+    message.textContent = hidden ? text('เปิดเฉลยเพื่อดูการแทนค่าและผลเทียบ','Reveal the answer to see numerical substitutions and the comparison.') : translate(calc.reason);
+    message.hidden = !message.textContent;
+    byId('steps').replaceChildren(...steps.map(step => {
+      const item = element('li');
+      item.dataset.formula = step.id;
+      const traceKey = step.id === 'ic' && (hidden || shown.region === 'forward_active') ? 'gain' : step.id;
+      item.append(traced(step.formula,traceKey));
+      if (!hidden) {
+        const value = element('p');
+        value.className = 'step-value';
+        value.append(element('span',translate(step.substitution)));
+        if (step.result) value.append(element('b',translate(step.result)));
+        item.append(value);
+      }
+      return item;
+    }));
+    byId('comparison-rows').replaceChildren(...rows.map(row => {
+      const item = element('tr');
+      item.dataset.comparison = row.state;
+      const heading = element('th',row.label);
+      heading.scope = 'row';
+      item.append(heading,element('td',row.manual),element('td',row.actual));
+      return item;
+    }));
+    const summary = rows.filter(row=>['IC_A','VCE_V'].includes(row.key)).map(row => {
+      const card = element('div');
+      card.className = 'summary-card';
+      card.dataset.comparison = row.state;
+      const list = element('dl');
+      for (const [label,value] of [[text('คำนวณมือ','Hand calculation'),row.manual],[text('โปรแกรม','Python solver'),row.actual]]) {
+        const entry = element('div');
+        entry.append(element('dt',label),element('dd',value));
+        list.append(entry);
+      }
+      card.append(element('h3',row.label),list);
+      return card;
+    });
+    byId('manual-summary').replaceChildren(...summary);
+    byId('manual-summary').hidden = !summary.length;
+    byId('comparison').hidden = !rows.length;
+    const visibleChecks = hidden ? [] : checks;
+    byId('circuit-checks').replaceChildren(...visibleChecks.map(check=>{
+      const item = element('li');
+      item.dataset.checkKey = check.key;
+      const verdict = element('strong',text({pass:'ผ่าน',fail:'ไม่ผ่าน',na:'ไม่ใช้'}[check.state],engineering[check.state]));
+      verdict.dataset.checkState = check.state;
+      item.append(traced(text(thaiChecks[check.key] || check.label,check.label),check.key),verdict);
+      return item;
+    }));
+    byId('verification').hidden = !visibleChecks.length;
+    details.hidden = !(steps.length || rows.length || visibleChecks.length);
+    if (hidden && details.hidden) details.open = false;
+  }
 
-      form.addEventListener("input", schedule);
-      document.getElementById("reset-button").addEventListener("click", event => {
-        event.preventDefault();
-        for (const [name, value] of Object.entries(defaults)) {
-          form.elements.namedItem(name).value = value;
-        }
-        schedule();
+  function renderPractice(state) {
+    const enabled = practice !== 'off';
+    byId('practice-toggle').textContent = enabled ? text('ออกจากโหมดฝึก','Exit practice') : text('ฝึกทำ','Practice');
+    byId('practice-toggle').setAttribute('aria-pressed',String(enabled));
+    byId('practice-panel').hidden = !enabled;
+    if (!enabled) return;
+    const prompts = {
+      challenge:text('ลองหาค่า IC และ VCE จากวงจร กรอกคำตอบได้ตามต้องการ','Find IC and VCE from the circuit. Enter either prediction if you like.'),
+      hint:state.mode === 'divider' ? text('เริ่มทำวงจรเทียบเท่า Thévenin แล้วเขียน KVL รอบฐาน','Find the Thévenin equivalent, then write the base-loop KVL.')
+        : text('เริ่มจาก KVL รอบฐาน และใช้ IE = (β + 1) × IB','Start with base-loop KVL and IE = (β + 1) × IB.'),
+      steps:text('เปิดแผงสูตรเพื่อดูรูปสมการ','Open the formula panel for the symbolic equations.'),
+      answer:text('เปิดเฉลยในวงจร ผล และแผงสูตรแล้ว','The circuit, results and formulas now show the answer.'),
+    };
+    byId('practice-prompt').textContent = prompts[practice];
+    const next = byId('practice-next');
+    next.hidden = practice === 'answer';
+    next.disabled = ['pending','invalid','unavailable'].includes(state.region);
+    next.textContent = {challenge:text('ดูคำใบ้','Show hint'),hint:text('ดูรูปสมการ','Show equations'),steps:text('เปิดเฉลย','Reveal answer')}[practice] || '';
+    const differences = practice === 'answer' ? ['IC','VCE'].flatMap(key=>{
+      const guess = byId('guess-'+key.toLowerCase()).valueAsNumber;
+      return Number.isFinite(guess) && Number.isFinite(state.readings[key]) ? [`${key} ${format(key,guess-state.readings[key])}`] : [];
+    }) : [];
+    const feedback = byId('practice-feedback');
+    feedback.textContent = differences.length ? text('คำตอบที่กรอก − ผลโปรแกรม · ','Your answer − Python result · ')+differences.join(' · ') : '';
+    feedback.hidden = !differences.length;
+  }
+
+  function renderDiagnostics(state,hidden) {
+    const rows = hidden ? [] : state.diagnostics || [];
+    byId('diagnostics').hidden = !rows.length;
+    const labels = {ib:'I_B',ic:'I_C',vcb:'V_C − V_B',vce:'V_CE'};
+    byId('diagnostic-rows').replaceChildren(...rows.map(row=>element('li',
+      `${labels[row.key]} = ${Number(row.lhs.toPrecision(6))} ${row.unit} · ${text('ต้องเป็น','requires')} ${row.operator} ${row.rhs} ${row.unit}`)));
+    const junction = byId('diagnostic-trace');
+    junction.hidden = !rows.some(row=>row.key === 'vcb' || row.key === 'vce');
+    junction.dataset.trace = rows.some(row=>row.key === 'vcb') ? 'junction' : 'vce';
+  }
+
+  function render(state) {
+    shown = state;
+    const mode = activeMode.value;
+    const raw = Object.fromEntries(modeFields[mode].map(key=>[names[key],byId(key).value]));
+    const inputs = Object.fromEntries(Object.entries(state.input_values || {}).filter(([key,value])=>names[key] && Number.isFinite(value)).map(([key,value])=>[names[key],value]));
+    const calc = state.calculation || {};
+    const checks = state.verification || [];
+    const hasOperatingPoint = ['forward_active','cutoff_estimate','saturation_estimate'].includes(state.region);
+    const mismatch = hasOperatingPoint && calc.state !== 'match';
+    const readings = mismatch ? {} : unpack(state.results);
+    const hand = {values:unpack(Object.fromEntries((calc.comparison || []).map(row=>[row.key,row.manual_raw])))};
+    const nodes = unpack(state.results);
+    const hidden = !['off','answer'].includes(practice);
+    const explanation = translate(mismatch ? calc.reason : state.issue || state.model);
+    const warnings = (state.warnings || []).map(translate);
+    current = {mode,raw,inputs,readings,hand,nodes,region:mismatch ? 'mismatch' : state.region,
+      issue:hasOperatingPoint && !mismatch ? '' : explanation,warnings,
+      locale,answersHidden:hidden,caseLabel:example.value && cases[example.value] ? `${example.value} · ${cases[example.value].label}` : text('ค่าที่กรอกเอง','Custom values'),
+      drops:mismatch ? {} : state.drops || {},calculation:calc,verifications:checks};
+
+    const status = byId('status');
+    status.dataset.region = hidden && state.region !== 'invalid' ? 'pending' : current.region;
+    status.textContent = hidden && state.region !== 'invalid' ? text('กำลังฝึกทำ','Practice in progress') : regionText(current.region);
+    byId('model-description').textContent = hidden ? '' : explanation;
+    renderErrors(state.errors || {});
+    if (state.schematic_inputs) for (const node of document.querySelectorAll('[data-input-key]')) {
+      node.textContent = state.schematic_inputs[node.dataset.inputKey] ?? '—';
+    }
+    for (const node of document.querySelectorAll('[data-result-key]')) node.textContent = hidden || mismatch ? '—' : state.display?.[node.dataset.resultKey] ?? '—';
+    byId('warning-list').replaceChildren(...(!hidden ? warnings.map(warning=>element('li',warning)) : []));
+    byId('warning-list').hidden = hidden || !warnings.length;
+    byId('comparison-disclosure').hidden = hidden;
+    renderDiagnostics(state,hidden);
+    renderCalculation(calc,checks,hidden);
+    renderPractice(current);
+    document.dispatchEvent(new CustomEvent('workbench:render',{detail:current}));
+  }
+
+  function syncInputs(inputs) {
+    for (const node of document.querySelectorAll('[data-input-key]')) {
+      const raw = String(inputs[node.dataset.inputKey] ?? '').trim();
+      const number = Number(raw);
+      const valid = /^\+?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(raw) && Number.isFinite(number) && number>0;
+      const concise = valid ? raw.length<=7 ? raw : Number(number.toPrecision(5)).toString() : '—';
+      node.textContent = concise.length<=7 ? concise : number.toExponential(2).replace('e+','e');
+    }
+  }
+
+  function cancelPending() {
+    revision += 1;
+    clearTimeout(timer);
+    controller?.abort();
+  }
+
+  function schedule(delay = 300) {
+    cancelPending();
+    const ticket = revision;
+    const inputs = rawValues();
+    syncInputs(inputs);
+    render({region:'pending',issue:'Calculating the current inputs…'});
+    timer = setTimeout(async ()=>{
+      const request = new AbortController();
+      controller = request;
+      try {
+        const response = await fetch({{ url_for('calculate_json')|tojson }}, {method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify(inputs),signal:request.signal});
+        if (response.status !== 422 && !response.ok) throw Error('Calculation request failed');
+        const snapshot = await response.json();
+        if (ticket !== revision) return;
+        if (!snapshot.ok) {render({region:'invalid',issue:'Input validation failed.',errors:snapshot.errors});return;}
+        if (snapshot.mode !== activeMode.value) throw Error('Unexpected circuit in response');
+        render(snapshot);
+      } catch (error) {
+        if (ticket === revision && error.name !== 'AbortError') render({region:'unavailable',issue:'Live calculation is unavailable. Use Calculate to submit the form.'});
+      } finally {
+        if (controller === request) controller = null;
+      }
+    },delay);
+  }
+
+  function mount(mode,raw) {
+    if (mode === activeMode.value) {
+      for (const key of modeFields[mode]) byId(key).value = raw[key];
+    } else {
+      const parameter = byId('parameter-template');
+      const items = modeFields[mode].map(key=>{
+        const field = parameter.content.firstElementChild.cloneNode(true);
+        const [label,unit] = labels[key];
+        field.querySelector('label').htmlFor = key;
+        field.querySelector('label').textContent = label;
+        const input = field.querySelector('input');
+        input.id = input.name = key;
+        input.dataset.input = names[key];
+        input.value = raw[key];
+        input.setAttribute('aria-describedby','unit-'+key+' error-'+key);
+        field.querySelector('.unit').id = 'unit-'+key;
+        field.querySelector('.unit').textContent = unit || text('ไร้หน่วย','unitless');
+        field.querySelector('[data-error-key]').id = 'error-'+key;
+        field.querySelector('[data-error-key]').dataset.errorKey = key;
+        return field;
       });
-    })();
-  </script>
+      activeMode.value = mode;
+      byId('fields').replaceChildren(...items);
+      const diagrams = byId('schematics-'+mode).content.cloneNode(true);
+      byId('main-diagram').replaceChildren(diagrams.querySelector('#bias-schematic'));
+      byId('reference-diagram').replaceChildren(diagrams.querySelector('#reference-schematic'));
+      for (const label of document.querySelectorAll('.mode-label')) label.textContent = modes[mode];
+      for (const row of document.querySelectorAll('[data-divider-only]')) row.hidden = mode !== 'divider';
+    }
+    select.value = mode;
+  }
+
+  function resetPractice() {
+    if (practice !== 'off') practice = 'challenge';
+    byId('guess-ic').value = byId('guess-vce').value = '';
+  }
+
+  function changeMode() {
+    const mode = select.value;
+    if (mode === activeMode.value) return;
+    const previous = rawValues();
+    const raw = {...defaults[mode],...Object.fromEntries(['vcc','rc','beta','vbe'].map(key=>[key,previous[key] ?? defaults[mode][key]]))};
+    example.value = '';
+    mount(mode,raw);
+    resetPractice();
+    schedule(0);
+  }
+
+  function refreshLanguage() {
+    document.documentElement.lang = locale;
+    const button = byId('language');
+    button.textContent = text('EN','ไทย');
+    button.lang = text('en','th');
+    button.setAttribute('aria-label',text('Switch to English','เปลี่ยนเป็นภาษาไทย'));
+    for (const [node,english,label] of staticText) {
+      if (node.dataset.th) node.textContent = text(node.dataset.th,english);
+      if (node.dataset.thLabel) node.setAttribute('aria-label',text(node.dataset.thLabel,label));
+    }
+    example.options[0].text = text('กำหนดเอง','Custom values');
+    byId('unit-beta').textContent = text('ไร้หน่วย','unitless');
+    render(shown);
+  }
+
+  window.labWorkbench = {fieldKeys:fields,units,format,text,symbol:key=>key,regionText,resistanceBounds,
+    get state() {return current;},
+    setInput(key,value) {
+      const input = byId(inputKey(key));
+      if (!input) return false;
+      input.value = String(value);
+      input.dispatchEvent(new Event('input',{bubbles:true}));
+      return true;
+    },
+  };
+
+  example.replaceChildren(new Option('Custom values',''),...Object.keys(cases).map(id=>new Option(`${id} · ${caseNames[id]}`,id)));
+  const inputs = rawValues();
+  example.value = Object.keys(cases).find(id=>cases[id].mode === inputs.mode && Object.entries(cases[id].inputs).every(([key,value])=>inputs[key] === value)) || '';
+  example.addEventListener('change',()=>{
+    const sample = cases[example.value];
+    if (!sample) {render(shown);return;}
+    mount(sample.mode,sample.inputs);
+    resetPractice();
+    schedule(0);
+  });
+  form.addEventListener('input',()=>{
+    example.value = '';
+    resetPractice();
+    schedule();
+  });
+  form.addEventListener('submit',event=>{
+    if (shown.region === 'unavailable') {cancelPending();return;}
+    event.preventDefault();
+    schedule(0);
+  });
+  select.addEventListener('change',changeMode);
+  byId('mode-form').addEventListener('submit',event=>{event.preventDefault();changeMode();});
+  byId('language').addEventListener('click',()=>{locale = text('en','th');refreshLanguage();});
+  byId('practice-toggle').addEventListener('click',()=>{
+    practice = practice === 'off' ? 'challenge' : 'off';
+    resetPractice();
+    render(shown);
+  });
+  byId('practice-next').addEventListener('click',()=>{
+    practice = {challenge:'hint',hint:'steps',steps:'answer'}[practice] ?? 'answer';
+    render(shown);
+  });
+  for (const id of ['guess-ic','guess-vce']) byId(id).addEventListener('input',()=>renderPractice(current));
+  byId('diagnostic-trace').addEventListener('click',()=>byId('main-diagram').scrollIntoView({block:'center'}));
+  details.addEventListener('toggle',()=>{
+    if (details.open && matchMedia('(max-width:800px)').matches) details.scrollIntoView({block:'start'});
+  });
+  document.addEventListener('DOMContentLoaded',()=>{
+    document.documentElement.classList.add('js-enabled');
+    for (const id of ['language','case-field','practice-toggle','experiment-disclosure','record-disclosure']) byId(id).hidden = false;
+    render(initial);
+  });
+})();
+
+(() => {
+  const lab = window.labWorkbench;
+  const surfaces = [
+    {diagram:document.querySelector("#main-diagram"), controls:document.querySelector("#circuit-controls")},
+    {diagram:document.querySelector("#reference-diagram"), controls:document.querySelector("#reference-controls")}
+  ];
+  const tr = (th,en) => lab.text(th,en);
+  const layers = {voltage:true, current:true, drop:false};
+  const layerLabels = {
+    voltage:["แรงดันโหนด","Node voltages"],
+    current:["ทิศและค่ากระแส","Current arrows"],
+    drop:["แรงดันตกคร่อม","Resistor drops"]
+  };
+  const traceLabels = {
+    base:["วงรอบฐาน","Base loop"],
+    collector:["วงรอบคอลเลกเตอร์","Collector loop"],
+    collector_drop:["สาขาตัวต้านทาน RC","Collector resistor branch"],
+    transistor:["กระแสของทรานซิสเตอร์","Transistor currents"],
+    gain:["กระแสฐานและคอลเลกเตอร์","Base and collector currents"],
+    divider:["วงจรแบ่งแรงดัน","Voltage divider"],
+    divider_network:["เครือข่ายตัวต้านทานแบ่งแรงดัน","Voltage-divider resistor network"],
+    junction:["รอยต่อฐาน–คอลเลกเตอร์","Base–collector junction"],
+    vbe:["ขาเบส–อิมิตเตอร์","Base–emitter terminals"],
+    vce:["ขาคอลเลกเตอร์–อิมิตเตอร์","Collector–emitter terminals"],
+    emitter:["ทางเดินกระแสอิมิตเตอร์","Emitter path"]
+  };
+  const dropPositions = {
+    RC:[346,69,"start"],
+    RE:[346,306,"start"],
+    RB:[94,136,"end"],
+    R1:[94,136,"end"],
+    R2:[94,306,"end"],
+    RTH:[144,124,"middle"]
+  };
+  let state, lastMode, probe = false, positive = "", negative = "", trace = "", equivalent = false;
+  let layersOpen = false;
+
+  for (const [index, surface] of surfaces.entries()) {
+    const {controls} = surface;
+    controls.classList.add("circuit-tools");
+    controls.innerHTML = `
+      <div class="circuit-tool-row">
+        <button type="button" data-circuit-action="probe"></button>
+        <button type="button" data-circuit-action="equivalent"></button>
+        ${index === 0 ? '<button type="button" data-circuit-action="layers" aria-controls="circuit-layers"></button><span class="resistor-edit-hint"></span>' : ""}
+        <span class="trace-readout" hidden><span data-trace-label></span><button type="button" data-circuit-action="trace-clear">×</button></span>
+      </div>
+      <div class="probe-strip" hidden>
+        <output data-probe-value aria-live="polite" aria-atomic="true"><span data-probe-source></span><span data-probe-selection></span><span data-probe-number></span></output>
+        <button type="button" data-circuit-action="swap"></button>
+        <button type="button" data-circuit-action="clear"></button>
+      </div>
+      ${index === 0 ? '<div class="circuit-tool-row" id="circuit-layers" hidden>' +
+        Object.keys(layers).map(layer => `<button type="button" data-layer="${layer}"></button>`).join("") + '</div>' : ""}`;
+    controls.addEventListener("click", controlClick);
+    surface.diagram.addEventListener("click", event => activateDiagram(event.target));
+    surface.diagram.addEventListener("keydown", event => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      if (activateDiagram(event.target)) event.preventDefault();
+    });
+  }
+
+  function annotation(tag, attrs, content = "") {
+    const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [key,value] of Object.entries(attrs)) node.setAttribute(key,value);
+    node.textContent = content;
+    return node;
+  }
+
+  function mountEquivalent(original) {
+    const svg = original.cloneNode(true);
+    svg.dataset.equivalent = "";
+    for (const overlay of svg.querySelectorAll(".resistor-drops, .circuit-editors, .probe-markers, .trace-segments")) overlay.remove();
+    // The original remains mounted while its counterpart is visible.
+    svg.id += "-thevenin";
+    for (const element of svg.querySelectorAll("[id]")) element.id += "-thevenin";
+    svg.setAttribute("aria-labelledby", svg.getAttribute("aria-labelledby").split(" ").map(id => id + "-thevenin").join(" "));
+    svg.querySelector('[data-link="vcc-base"]').remove();
+    svg.querySelector('[data-link="base-r2-ground"]').remove();
+    for (const key of ["R1","R2"]) {
+      const resistor = svg.querySelector(`[data-resistor="${key}"]`);
+      const label = resistor.nextElementSibling;
+      svg.querySelector(`[data-component="${key}"]`).remove();
+      label.remove();
+      resistor.remove();
+    }
+    svg.querySelector(".ground-symbol").remove();
+    svg.querySelector('circle[cx="112"][cy="180"]').remove();
+    const supply = svg.querySelector('[data-component="VCC"]');
+    supply.setAttribute("x",328);
+    svg.querySelector('[data-link="supply-feed"]').setAttribute("d","M328 34V80");
+    svg.querySelector('circle[cx="220"][cy="49"]').remove();
+    svg.querySelector('[data-current-direction="IB"]').setAttribute("transform","translate(37 3) scale(.97 1)");
+    const equivalentBranch = annotation("g",{"data-equivalent-branch":""});
+    equivalentBranch.innerHTML = `
+      <path class="circuit-wires" fill="none" d="M65 207V180H109M175 180H252M65 257V319H328"/>
+      <path class="circuit-wires" data-resistor="RTH" d="M109 180l9-8 9 16 10-16 9 16 10-16 10 16 9-8"/>
+      <circle class="transistor-housing" cx="65" cy="232" r="25"/>
+      <circle class="circuit-junctions" cx="328" cy="319" r="4"/>
+      <text class="component-labels" text-anchor="middle" x="65" y="226">+</text>
+      <text class="component-labels" text-anchor="middle" x="65" y="248">−</text>
+      <text class="component-labels" x="100" y="228">VTH</text>
+      <text class="component-number" data-derived="VTH" x="100" y="248"></text>
+      <text class="component-labels" text-anchor="middle" x="144" y="143">RTH</text>
+      <text class="component-number" data-derived="RTH" text-anchor="middle" x="144" y="162"></text>`;
+    svg.querySelector(".terminal-labels").before(equivalentBranch);
+    original.after(svg);
+    return svg;
+  }
+
+  function decorate(svg) {
+    const derived = "equivalent" in svg.dataset;
+    const isDivider = state.mode === "divider";
+    const nodes = {
+      VCC:[derived ? 328 : 220,49],
+      B:[isDivider && !derived ? 112 : 197,180],
+      C:[328,141], E:[328,221], GND:[328,319]
+    };
+    if (isDivider) nodes.GNDLeft = [derived ? 65 : 112,319];
+    svg.setAttribute("role","group");
+    const traces = annotation("g",{"class":"trace-segments","aria-hidden":"true"});
+    // A single template path can carry more than one branch. Trace only the wire used by the equation.
+    const traceSegments = {
+      "collector-feed":derived ? "M328 34V80" : "M220 34v15H328V80",
+      "base-bar":"M252 155v51",
+      "collector-lead":"M252 167l38-26",
+      "emitter-lead":"M252 192l38 29"
+    };
+    if (!derived) traceSegments["base-feed"] = "M220 34v15H112V80M112 127V180H252";
+    for (const [segment,d] of Object.entries(traceSegments)) traces.append(annotation("path",{"data-trace-segment":segment,d}));
+    const groundSymbols = svg.querySelectorAll(".ground-symbol");
+    groundSymbols[groundSymbols.length - 1].dataset.return = "emitter";
+    if (groundSymbols.length === 2) groundSymbols[0].dataset.return = "divider";
+    const drops = annotation("g",{"class":"resistor-drops"});
+    const editors = annotation("g",{"class":"circuit-editors"});
+    const markers = annotation("g",{"class":"probe-markers"});
+    for (const resistor of svg.querySelectorAll("[data-resistor]")) {
+      const key = resistor.dataset.resistor;
+      const [x,y,anchor] = dropPositions[key];
+      drops.append(annotation("text",{x,y,"text-anchor":anchor,"data-drop":key}));
+      if (key === "RTH") continue;
+      const right = key === "RC" || key === "RE";
+      const top = key === "RE" || key === "R2" ? 244 : 76;
+      const target = annotation("rect",{x:right ? 317 : 20,y:top,width:right ? 111 : 103,height:55,rx:5,
+        "data-edit-resistor":key,role:"button"});
+      editors.append(target);
+    }
+    for (const [key,[x,y]] of Object.entries(nodes)) {
+      const marker = annotation("g",{"data-probe-node":key,role:"button"});
+      marker.append(annotation("circle",{cx:x,cy:y,r:31,class:"probe-hit"}),
+        annotation("circle",{cx:x,cy:y,r:12,class:"probe-ring"}),
+        annotation("text",{x,y:y+5,class:"probe-polarity","text-anchor":"middle","aria-hidden":"true"}));
+      markers.append(marker);
+    }
+    svg.append(traces,drops,editors,markers);
+  }
+
+  function nodeVoltage(key) {
+    if (key === "VCC") return state.inputs.VCC;
+    if (key === "GND" || key === "GNDLeft") return 0;
+    return state.readings["V" + key];
+  }
+
+  const nodeName = key => key === "GNDLeft" ? "GND" : key;
+
+  function probeDifference(plus, minus) {
+    const a = nodeName(plus), b = nodeName(minus);
+    // Prefer the solver's branch value when subtraction would lose a small drop.
+    const drops = {"VCC:C":state.drops.RC, "VCC:B":state.drops[state.mode === "divider" ? "R1" : "RB"],
+      "C:E":state.readings.VCE};
+    const direct = drops[a+":"+b], reverse = drops[b+":"+a];
+    if (Number.isFinite(direct)) return direct;
+    if (Number.isFinite(reverse)) return -reverse;
+    return nodeVoltage(plus) - nodeVoltage(minus);
+  }
+
+  function exposedVoltage(value) {
+    return Number.isFinite(value) ? lab.format("VCE",value) : "—";
+  }
+
+  function activateDiagram(target) {
+    const point = target.closest("[data-probe-node]");
+    if (probe && point) {
+      const key = point.dataset.probeNode;
+      if (!positive || negative) {
+        positive = key;
+        negative = "";
+      } else {
+        negative = key;
+      }
+      refresh();
+      return true;
+    }
+    const part = target.closest("[data-edit-resistor]");
+    if (!probe && part) {
+      const field = document.querySelector(`#fields [data-input="${part.dataset.editResistor}"]`);
+      field?.focus();
+      field?.select();
+      return true;
+    }
+    return false;
+  }
+
+  function controlClick(event) {
+    const button = event.target.closest("button");
+    if (!button) return;
+    if (button.dataset.layer) layers[button.dataset.layer] = !layers[button.dataset.layer];
+    switch (button.dataset.circuitAction) {
+      case "probe":
+        probe = !probe;
+        positive = negative = "";
+        break;
+      case "swap": [positive,negative] = [negative,positive]; break;
+      case "clear": positive = negative = ""; break;
+      case "equivalent":
+        equivalent = !equivalent;
+        if ((equivalent && ["divider","divider_network"].includes(trace)) || (!equivalent && trace === "base")) trace = "";
+        break;
+      case "layers": layersOpen = !layersOpen; break;
+      case "trace-clear": trace = ""; break;
+    }
+    refresh();
+  }
+
+  function updateProbe(controls, available) {
+    const strip = controls.querySelector(".probe-strip");
+    strip.hidden = !probe;
+    const source = strip.querySelector("[data-probe-source]");
+    const selection = strip.querySelector("[data-probe-selection]");
+    const number = strip.querySelector("[data-probe-number]");
+    const picked = probe && Boolean(positive && negative);
+    source.textContent = picked ? tr("ค่าจากแบบจำลอง","Model value") : "";
+    selection.textContent = !probe ? "" : !positive ? tr("แตะโหนดขั้ว +","Pick the + node")
+      : !negative ? `+ ${nodeName(positive)} · ${tr("แตะโหนดขั้ว −","Pick the − node")}`
+      : `${nodeName(positive)} − ${nodeName(negative)} = `;
+    const voltage = picked && available ? probeDifference(positive,negative) : NaN;
+    const measured = Number.isFinite(voltage);
+    number.textContent = !picked ? "" : measured ? exposedVoltage(voltage) : tr("ประเมินไม่ได้","Unavailable");
+    number.classList.toggle("probe-measured",measured);
+  }
+
+  function updateControls(controls, available) {
+    const compact = controls.id === "reference-controls";
+    const action = key => controls.querySelector(`[data-circuit-action="${key}"]`);
+    action("probe").textContent = compact ? tr("โพรบ","Probe") : tr("โพรบแรงดัน","Voltage probe");
+    action("probe").setAttribute("aria-label",tr("โพรบแรงดัน","Voltage probe"));
+    action("probe").setAttribute("aria-pressed",probe);
+    action("equivalent").hidden = state.mode !== "divider";
+    action("equivalent").textContent = equivalent ? (compact ? tr("วงจรเดิม","Original") : tr("กลับวงจรเดิม","Original circuit")) : "Thévenin";
+    action("equivalent").setAttribute("aria-pressed",equivalent);
+    action("trace-clear").setAttribute("aria-label",tr("ล้างการเน้นวงจร","Clear circuit highlight"));
+    controls.querySelector(".trace-readout").hidden = !trace;
+    controls.querySelector("[data-trace-label]").textContent = trace ? tr(...traceLabels[trace]) : "";
+    updateProbe(controls,available);
+    action("swap").textContent = tr("สลับขั้ว","Swap");
+    action("swap").disabled = !negative;
+    action("clear").textContent = tr("ล้าง","Clear");
+    action("clear").disabled = !positive;
+    if (action("layers")) {
+      const editHint = controls.querySelector(".resistor-edit-hint");
+      editHint.textContent = tr("แตะ R เพื่อแก้ค่า","Tap a resistor to edit");
+      editHint.hidden = probe;
+      action("layers").textContent = tr("ชั้นข้อมูล","Layers");
+      action("layers").setAttribute("aria-expanded",layersOpen);
+      controls.querySelector("#circuit-layers").hidden = !layersOpen;
+      for (const button of controls.querySelectorAll("[data-layer]")) {
+        button.textContent = tr(...layerLabels[button.dataset.layer]);
+        button.setAttribute("aria-pressed",layers[button.dataset.layer]);
+      }
+    }
+  }
+
+  function updateHighlights(svg) {
+    for (const part of svg.querySelectorAll(".circuit-highlight")) part.classList.remove("circuit-highlight");
+    const baseFeed = '[data-trace-segment="base-feed"], [data-resistor="RB"], [data-resistor="R1"]';
+    const baseCurrent = '[data-current-direction="IB"]';
+    const dividerNetwork = `${baseFeed}, [data-link="base-r2-ground"], [data-resistor="R2"], [data-return="divider"]`;
+    const emitter = '[data-link*="emitter"], [data-resistor="RE"], [data-return="emitter"], [data-trace-segment="emitter-lead"], .emitter-arrow';
+    const collector = '[data-trace-segment="collector-feed"], [data-link="rc-collector"], [data-resistor="RC"], [data-trace-segment="collector-lead"]';
+    const transistor = ".transistor-leads, .emitter-arrow, .transistor-housing:not([data-equivalent-branch] *)";
+    const collectorCurrent = '[data-current-direction="IC"]';
+    const map = {
+      base:`${baseFeed}, ${baseCurrent}, [data-equivalent-branch], ${emitter}, [data-trace-segment="base-bar"]`,
+      collector:`${collector}, ${emitter}, ${collectorCurrent}, [data-current-direction="IE"]`,
+      collector_drop:`${collector}, ${collectorCurrent}, [data-terminal="C"]`,
+      transistor:`${transistor}, .current-directions > g`,
+      gain:`${baseCurrent}, ${collectorCurrent}, [data-terminal="B"], [data-terminal="C"]`,
+      divider:`${dividerNetwork}, ${baseCurrent}`,
+      divider_network:dividerNetwork,
+      junction:'[data-trace-segment="base-bar"], [data-trace-segment="collector-lead"], [data-terminal="B"], [data-terminal="C"]',
+      vbe:'[data-trace-segment="base-bar"], [data-trace-segment="emitter-lead"], [data-terminal="B"], [data-terminal="E"]',
+      vce:'[data-trace-segment="collector-lead"], [data-trace-segment="emitter-lead"], [data-terminal="C"], [data-terminal="E"]',
+      emitter:`${emitter}, [data-current-direction="IE"]`
+    };
+    if (trace) for (const part of svg.querySelectorAll(map[trace])) part.classList.add("circuit-highlight");
+  }
+
+  function updateSVG(svg, original, available) {
+    const derived = svg !== original;
+    if (derived) {
+      svg.querySelector("title").textContent = tr("วงจรสมมูล Thévenin · NPN","Thévenin equivalent · NPN");
+      svg.querySelector("desc").textContent = tr(
+        "แหล่ง VTH และ RTH ต่ออนุกรมเข้าฐาน ส่วน VCC จ่ายผ่าน RC เข้าคอลเลกเตอร์ โดยใช้กราวด์ร่วมกับ RE",
+        "VTH and RTH feed the base in series. VCC feeds the collector through RC. Both sources share ground with RE.");
+      for (const item of svg.querySelectorAll("[data-derived]")) {
+        const key = item.dataset.derived;
+        const value = state.readings[key];
+        item.textContent = !state.answersHidden && Number.isFinite(value) ? lab.format(key,value) : "—";
+      }
+      for (const item of svg.querySelectorAll("[data-input-key], [data-voltage]")) {
+        const attribute = item.hasAttribute("data-input-key") ? "data-input-key" : "data-voltage";
+        item.textContent = original.querySelector(`[${attribute}="${item.getAttribute(attribute)}"]`).textContent;
+      }
+    }
+    svg.classList.toggle("probe-active",probe);
+    svg.querySelector(".measure-value").toggleAttribute("hidden",!layers.voltage || state.answersHidden);
+    svg.querySelector(".current-directions").toggleAttribute("hidden",!layers.current);
+    svg.querySelector(".resistor-drops").toggleAttribute("hidden",!layers.drop || !available);
+    for (const group of svg.querySelectorAll("[data-current-direction]")) {
+      const key = group.dataset.currentDirection;
+      const value = state.readings[key];
+      const label = group.querySelector("text");
+      label.textContent = key;
+      if (available && Number.isFinite(value)) {
+        const amount = label.cloneNode(false);
+        amount.classList.add("circuit-current-number");
+        amount.setAttribute("text-anchor",key === "IB" ? "start" : "end");
+        amount.setAttribute("x",key === "IB" ? 151 : key === "IC" ? 288 : 299);
+        amount.setAttribute("y",key === "IC" ? 119 : key === "IE" ? 301 : 132);
+        amount.textContent = lab.format(key,value);
+        group.querySelector(".circuit-current-number")?.remove();
+        group.append(amount);
+      } else {
+        group.querySelector(".circuit-current-number")?.remove();
+      }
+    }
+    for (const item of svg.querySelectorAll("[data-drop]")) {
+      const value = state.drops[item.dataset.drop];
+      item.textContent = available ? "Δ " + exposedVoltage(value) : "";
+    }
+    for (const target of svg.querySelectorAll("[data-edit-resistor]")) {
+      target.setAttribute("tabindex",probe ? "-1" : "0");
+      target.setAttribute("aria-label",`${tr("แก้ค่า","Edit")} ${target.dataset.editResistor}`);
+    }
+    const marks = svg.querySelector(".probe-markers");
+    marks.toggleAttribute("hidden",!probe);
+    for (const marker of marks.children) {
+      const key = marker.dataset.probeNode;
+      const lead = (key === positive ? "+" : "") + (key === negative ? "−" : "");
+      marker.dataset.lead = lead;
+      marker.setAttribute("tabindex",probe ? "0" : "-1");
+      const name = key === "GNDLeft" ? tr("กราวด์ด้านวงจรฐาน","Base-network ground") : nodeName(key);
+      marker.setAttribute("aria-label",`${tr("โหนด","Node")} ${name}${lead ? " · " + lead : ""}`);
+      marker.querySelector("text").textContent = lead;
+    }
+    updateHighlights(svg);
+  }
+
+  function refresh() {
+    const available = !state.answersHidden && Number.isFinite(state.readings.VB) &&
+      Number.isFinite(state.readings.VC) && Number.isFinite(state.readings.VE);
+    for (const {diagram,controls} of surfaces) {
+      updateControls(controls,available);
+      const original = diagram.querySelector("svg:not([data-equivalent])");
+      if (!original) continue;
+      let derived = diagram.querySelector("svg[data-equivalent]");
+      if (equivalent && !derived) derived = mountEquivalent(original);
+      original.toggleAttribute("hidden",equivalent);
+      for (const svg of [original,derived]) {
+        if (!svg) continue;
+        if (!svg.querySelector(".probe-markers")) decorate(svg);
+        if (svg === derived) svg.toggleAttribute("hidden",!equivalent);
+        updateSVG(svg,original,available);
+      }
+    }
+    for (const button of document.querySelectorAll("[data-trace]")) {
+      if (button.dataset.trace in traceLabels) button.setAttribute("aria-pressed",button.dataset.trace === trace);
+    }
+  }
+
+  document.addEventListener("click",event => {
+    const button = event.target.closest("[data-trace]");
+    if (!button || !(button.dataset.trace in traceLabels)) return;
+    trace = trace === button.dataset.trace ? "" : button.dataset.trace;
+    if (["divider","divider_network"].includes(trace)) equivalent = false;
+    if (trace === "base" && state.mode === "divider") equivalent = true;
+    refresh();
+  });
+  document.addEventListener("workbench:render",event => {
+    if (lastMode !== event.detail.mode) {
+      equivalent = false;
+      positive = negative = trace = "";
+    }
+    state = event.detail;
+    lastMode = state.mode;
+    refresh();
+  });
+})();
+
+(() => {
+  const lab = window.labWorkbench;
+  const root = document.getElementById("experiment-tools");
+  root.innerHTML = `
+    <details id="sweep-tool" name="lab-experiment" open>
+      <summary id="sweep-label"></summary>
+      <p id="sweep-lock" class="experiment-body" hidden></p>
+      <div id="sweep-body" class="experiment-body">
+        <form id="sweep-form" class="experiment-form" novalidate>
+          <label for="sweep-field"><span id="sweep-field-label"></span><select id="sweep-field"></select></label>
+          <label for="sweep-start"><span id="sweep-start-label"></span><input id="sweep-start" type="number" step="any" inputmode="decimal"></label>
+          <label for="sweep-end"><span id="sweep-end-label"></span><input id="sweep-end" type="number" step="any" inputmode="decimal"></label>
+          <button id="sweep-submit" type="submit"></button>
+        </form>
+        <p id="sweep-status" class="experiment-status" role="status"></p>
+        <div id="sweep-charts" class="experiment-charts"></div>
+        <details id="sweep-data" hidden>
+          <summary id="sweep-data-label"></summary>
+          <div class="experiment-table-wrap" tabindex="0" role="region" aria-labelledby="sweep-data-label">
+            <table>
+              <thead><tr><th scope="col" id="sweep-x-label"></th><th scope="col">IC (mA)</th><th scope="col">VCE (V)</th><th scope="col" id="sweep-region-label"></th></tr></thead>
+              <tbody id="sweep-rows"></tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+    </details>
+    <details id="inverse-tool" name="lab-experiment">
+      <summary id="inverse-label"></summary>
+      <div class="experiment-body">
+        <p id="inverse-lock" hidden></p>
+        <div id="inverse-body">
+          <form id="inverse-form" class="experiment-form" novalidate>
+            <label for="inverse-target"><span id="inverse-target-label"></span><input id="inverse-target" type="number" step="any" inputmode="decimal"></label>
+            <button id="inverse-submit" type="submit"></button>
+          </form>
+          <p id="inverse-result" class="experiment-status" role="status"></p>
+          <button id="inverse-apply" type="button" hidden></button>
+        </div>
+      </div>
+    </details>`;
+
+  const item = id => root.querySelector(`#${id}`);
+  const text = (th, en) => lab.text(th, en);
+  const label = (id, th, en) => { item(id).textContent = text(th, en); };
+  const field = item("sweep-field");
+  const start = item("sweep-start");
+  const end = item("sweep-end");
+  const target = item("inverse-target");
+  const count = 41;
+  const [minRE, maxRE] = lab.resistanceBounds;
+  const solved = new Set(["forward_active", "cutoff_estimate", "saturation_estimate"]);
+  const noReading = new Set(["outside_model", "invalid", "mismatch"]);
+  let mode;
+  let circuitStamp;
+  let needsRange;
+  let sweepRequest;
+  let inverseRequest;
+  let sweep = null;
+  let inverse = null;
+
+  const fmt = (n, digits = 7) => Number(n.toPrecision(digits)).toString();
+  const axisUnit = key => key.startsWith("R") ? "kΩ" : key === "β" ? text("ไร้หน่วย", "unitless") : "V";
+  const stamp = state => JSON.stringify([state.mode, ...lab.fieldKeys(state.mode).map(key => state.raw[key])]);
+  const apiKey = key => key === "β" ? "beta" : key.toLowerCase();
+  const available = state => state && !state.answersHidden && !["pending", "unavailable"].includes(state.region);
+
+  async function requestTool(url, controller, state, options) {
+    const inputs = Object.fromEntries(lab.fieldKeys(state.mode).map(key => [apiKey(key), state.raw[key]]));
+    const response = await fetch(url, {
+      method: "POST", headers: {"Content-Type": "application/json"}, signal: controller.signal,
+      body: JSON.stringify({mode: state.mode, inputs, ...options}),
+    });
+    const data = await response.json();
+    if (response.ok && data?.ok === true) return data;
+    if ([400, 422].includes(response.status) && data?.ok === false && typeof data.code === "string") return data;
+    throw new Error("Unexpected calculation response");
+  }
+
+  function showRangeLabels() {
+    const unit = axisUnit(field.value);
+    label("sweep-start-label", `เริ่ม (${unit})`, `Start (${unit})`);
+    label("sweep-end-label", `สิ้นสุด (${unit})`, `End (${unit})`);
+  }
+
+  function defaults(state) {
+    const value = state.inputs[field.value];
+    needsRange = !Number.isFinite(value);
+    start.value = Number.isFinite(value) ? fmt(value / 2) : "";
+    end.value = Number.isFinite(value) ? fmt(value * 1.5) : "";
+  }
+
+  function plot(points, key, unit, xLabel) {
+    const values = points.filter(point => point.valid).map(point => point.readings[key]);
+    if (!values.length) return "";
+    let low = Math.min(...values);
+    let high = Math.max(...values);
+    if (low === high) {
+      const padding = high === 0 ? 1 : Math.max(Math.abs(high) * 0.05, Number.MIN_VALUE);
+      high += padding;
+      low = Math.max(0, low - padding);
+    }
+    const left = 76, right = 300, top = 26, bottom = 108;
+    const x = index => left + (right - left) * index / (count - 1);
+    const y = point => bottom - (bottom - top) * (point.readings[key] - low) / (high - low);
+    const path = [];
+    const dots = [];
+    points.forEach((point, index) => {
+      if (!point.valid) return;
+      const follows = points[index - 1]?.valid;
+      path.push(`${follows ? "L" : "M"}${x(index)} ${y(point)}`);
+      if (!follows && !points[index + 1]?.valid) dots.push(`<circle cx="${x(index)}" cy="${y(point)}" r="3"/>`);
+    });
+    return `<svg viewBox="0 0 325 151" role="img" aria-labelledby="sweep-plot-${key}" data-series="${key}">
+      <title id="sweep-plot-${key}">${key} (${unit}) / ${xLabel}</title>
+      <text class="experiment-axis-label" x="${left}" y="17">${key} (${unit})</text>
+      <line x1="${left}" y1="${top}" x2="${right}" y2="${top}"/>
+      <line x1="${left}" y1="${top}" x2="${left}" y2="${bottom}"/>
+      <line x1="${left}" y1="${bottom}" x2="${right}" y2="${bottom}"/>
+      <text x="${left - 5}" y="${top + 4}" text-anchor="end">${fmt(high, 4)}</text>
+      <text x="${left - 5}" y="${bottom}" text-anchor="end">${fmt(low, 4)}</text>
+      <text x="${left}" y="126">${fmt(points[0].value, 4)}</text>
+      <text x="${right}" y="126" text-anchor="end">${fmt(points.at(-1).value, 4)}</text>
+      <text class="experiment-axis-label" x="${(left + right) / 2}" y="144" text-anchor="middle">${xLabel}</text>
+      <path d="${path.join(" ")}"/>${dots.join("")}
+    </svg>`;
+  }
+
+  function showSweep() {
+    let message = "";
+    const points = sweep?.points;
+    switch (sweep?.error) {
+      case "range": message = text("กรอกค่าขอบเขตที่เป็นบวก โดยให้ค่าเริ่มต้นน้อยกว่าค่าสิ้นสุด", "Enter finite positive bounds, with the start below the end."); break;
+      case "inputs": message = text("ตรวจอินพุตของวงจรตัวอื่นก่อนกวาดค่า", "Correct the other circuit inputs before running the sweep."); break;
+      case "parameter": message = text("เลือกตัวแปรของวงจรปัจจุบัน", "Choose a parameter of the current circuit."); break;
+      case "stale": message = text("ค่าเปลี่ยนแล้ว กดกวาดค่าอีกครั้ง", "Values changed. Run another sweep to update the results."); break;
+      case "unavailable": message = text("เครื่องมือกวาดค่าขัดข้อง ลองใหม่ได้", "Sweep is temporarily unavailable. Try again."); break;
+      case undefined: break;
+      default: message = text("ตรวจค่าที่กรอกแล้วลองกวาดค่าอีกครั้ง", "Check the inputs and run the sweep again.");
+    }
+    if (sweep?.pending) message = text("กำลังคำนวณช่วงที่เลือก…", "Calculating the selected range…");
+    const xLabel = `${field.value} (${axisUnit(field.value)})`;
+    if (points) {
+      const valid = points.filter(point => point.valid).length;
+      message = text(`${valid} จาก ${count} จุดมีผลที่ตรวจสอบได้ ช่วงที่ไม่มีผลจะแสดงเป็นช่องว่าง`, `${valid} of ${count} samples have verified readings. Gaps mark unavailable readings.`);
+    }
+    item("sweep-status").textContent = message;
+    item("sweep-submit").disabled = !available(lab.state) || !!sweep?.pending;
+    item("sweep-data").hidden = !points;
+    item("sweep-x-label").textContent = xLabel;
+    item("sweep-charts").innerHTML = points ? plot(points, "IC", "mA", xLabel) + plot(points, "VCE", "V", xLabel) : "";
+    item("sweep-rows").innerHTML = points ? points.map(({value, region, readings, valid}) =>
+      `<tr><th scope="row">${fmt(value)}</th><td>${valid ? fmt(readings.IC) : "—"}</td><td>${valid ? fmt(readings.VCE) : "—"}</td><td data-region="${region}">${lab.regionText(region)}</td></tr>`
+    ).join("") : "";
+  }
+
+  item("sweep-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    const state = lab.state;
+    if (!available(state)) return;
+    const from = start.valueAsNumber;
+    const to = end.valueAsNumber;
+    sweepRequest?.abort();
+    sweepRequest = undefined;
+    if (!(Number.isFinite(from) && Number.isFinite(to) && from > 0 && to > from)) {
+      sweep = {error: "range"};
+      showSweep();
+      return;
+    }
+    const controller = new AbortController();
+    sweepRequest = controller;
+    sweep = {pending: true};
+    showSweep();
+    try {
+      const data = await requestTool("/api/sweep", controller, state, {parameter: apiKey(field.value), start: from, end: to});
+      if (sweepRequest !== controller) return;
+      if (!data.ok) sweep = {error: data.code};
+      else {
+        if (!Array.isArray(data.points) || data.points.length !== count) throw new Error("Unexpected sweep size");
+        sweep = {points: data.points.map(({value, region, results}) => {
+          const valid = solved.has(region);
+          if (!Number.isFinite(value) || (!valid && !noReading.has(region))) throw new Error("Unexpected sweep sample");
+          const readings = valid ? sweepReadings(results) : {};
+          return {value, region, readings, valid};
+        })};
+      }
+    } catch {
+      if (sweepRequest !== controller) return;
+      sweep = {error: "unavailable"};
+    } finally {
+      if (sweepRequest === controller) {
+        sweepRequest = undefined;
+        showSweep();
+      }
+    }
+  });
+
+  item("sweep-form").addEventListener("input", event => {
+    if (event.target === field) defaults(lab.state);
+    else needsRange = false;
+    sweepRequest?.abort();
+    sweepRequest = undefined;
+    sweep = null;
+    showSweep();
+    showRangeLabels();
+  });
+
+  function sweepReadings(results) {
+    if (!Number.isFinite(results?.IC_A) || !Number.isFinite(results?.VCE_V)) throw new Error("Missing solver reading");
+    return {IC: results.IC_A * 1000, VCE: results.VCE_V};
+  }
+
+  function showInverse() {
+    let message = "";
+    switch (inverse?.error) {
+      case "target": message = text("กรอก IC เป้าหมายเป็นจำนวนบวกที่มีค่าจำกัด", "Enter a finite positive IC target."); break;
+      case "inputs": message = text("ตรวจ VCC, VBE, RB, RC และ β ก่อนหา RE", "Correct VCC, VBE, RB, RC and β before solving for RE."); break;
+      case "drive": message = text("ต้องมี VCC > VBE เพื่อให้กระแสฐานเป็นบวก", "VCC must exceed VBE to obtain positive base current."); break;
+      case "range": {
+        const bounds = `${fmt(minRE)}–${maxRE.toExponential()} kΩ`;
+        const range = inverse.range?.every(Number.isFinite) && inverse.range.length === 2
+          ? `${fmt(inverse.range[0])}–${fmt(inverse.range[1])} mA` : "";
+        message = range ? text(`เป้าหมายอยู่นอกช่วง ${range} จากขอบเขต RE ที่รองรับ (${bounds})`, `Target is outside ${range}, the IC interval from the supported RE bounds (${bounds}).`)
+          : text(`เป้าหมายให้ค่า RE นอกช่วงที่รองรับ (${bounds})`, `The target needs a resistor outside the supported RE range (${bounds}).`);
+        break;
+      }
+      case "region": message = text("เป้าหมายไม่ผ่านเกณฑ์ Forward Active ที่ต้องมี IB > 0, VC > VB และ VCE > 0.20 V", "The target fails the Forward Active check for IB > 0, VC > VB and VCE > 0.20 V."); break;
+      case "verify": message = text("ยืนยันเป้าหมายด้วยการแทนค่า RE กลับในแบบจำลองไม่ได้", "Forward calculation could not verify the target with this RE."); break;
+      case "stale": message = text("ค่าวงจรเปลี่ยนแล้ว กดหา RE อีกครั้ง", "Circuit values changed. Solve again for the new values."); break;
+      case "mode": message = text("เลือกวงจร Emitter Bias ก่อนหา RE", "Choose Emitter Bias before solving for RE."); break;
+      case "unavailable": message = text("เครื่องมือหา RE ขัดข้อง ลองใหม่ได้", "The inverse tool is temporarily unavailable. Try again."); break;
+      case undefined: break;
+      default: message = text("ตรวจเป้าหมายและอินพุตก่อนหา RE อีกครั้ง", "Check the target and inputs before solving for RE.");
+    }
+    if (inverse?.pending) message = text("กำลังหาและตรวจค่า RE…", "Solving and verifying RE…");
+    if (inverse?.re) {
+      const reading = `RE = ${fmt(inverse.re)} kΩ · IC = ${fmt(inverse.IC)} mA · VCE = ${fmt(inverse.VCE)} V`;
+      message = text(`ตรวจโดยแทนค่ากลับ (Forward Active) · ${reading}`, `Forward check passed (Forward Active) · ${reading}`);
+    }
+    item("inverse-result").textContent = message;
+    item("inverse-apply").hidden = !inverse?.re;
+    item("inverse-submit").disabled = !available(lab.state) || !!inverse?.pending;
+  }
+
+  item("inverse-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    const state = lab.state;
+    if (!available(state) || state.mode !== "emitter") return;
+    const wanted = target.valueAsNumber;
+    inverseRequest?.abort();
+    inverseRequest = undefined;
+    if (!(Number.isFinite(wanted) && wanted > 0)) {
+      inverse = {error: "target"};
+      showInverse();
+      return;
+    }
+    const controller = new AbortController();
+    inverseRequest = controller;
+    inverse = {pending: true};
+    showInverse();
+    try {
+      const data = await requestTool("/api/inverse", controller, state, {target_ic_ma: wanted});
+      if (inverseRequest !== controller) return;
+      if (!data.ok) inverse = {error: data.code, range: Array.isArray(data.target_range_ma) ? data.target_range_ma : null};
+      else {
+        const re = data.re_kohm;
+        if (data.region !== "forward_active" || !Number.isFinite(re) || re < minRE || re > maxRE) throw new Error("Unexpected resistor response");
+        inverse = {re, ...sweepReadings(data.results), wanted, stamp: stamp(state)};
+      }
+    } catch {
+      if (inverseRequest !== controller) return;
+      inverse = {error: "unavailable"};
+    } finally {
+      if (inverseRequest === controller) {
+        inverseRequest = undefined;
+        showInverse();
+      }
+    }
+  });
+
+  target.addEventListener("input", () => {
+    inverseRequest?.abort();
+    inverseRequest = undefined;
+    inverse = null;
+    showInverse();
+  });
+
+  item("inverse-apply").addEventListener("click", () => {
+    const state = lab.state;
+    if (!inverse?.re || !available(state) || state.mode !== "emitter") return;
+    if (inverse.wanted !== target.valueAsNumber || inverse.stamp !== stamp(state)) return;
+    const {re} = inverse;
+    inverse = null;
+    showInverse();
+    lab.setInput("RE", re);
+  });
+
+  document.addEventListener("workbench:render", ({detail: state}) => {
+    const nextStamp = stamp(state);
+    if (circuitStamp !== nextStamp || !available(state)) {
+      sweepRequest?.abort();
+      inverseRequest?.abort();
+      sweepRequest = inverseRequest = undefined;
+      if (sweep) sweep = {error: "stale"};
+      if (inverse) inverse = {error: "stale"};
+    }
+    if (mode !== state.mode) {
+      mode = state.mode;
+      field.replaceChildren(...lab.fieldKeys(mode).map(key => new Option(key, key)));
+      if (lab.fieldKeys(mode).includes("RE")) field.value = "RE";
+      else field.value = "RB";
+      defaults(state);
+      sweep = inverse = null;
+    } else if (needsRange && Number.isFinite(state.inputs[field.value])) defaults(state);
+    circuitStamp = nextStamp;
+    if (state.answersHidden) {
+      sweep = inverse = null;
+      target.value = "";
+      item("sweep-data").open = false;
+    }
+    label("sweep-label", "กวาดค่าทีละตัวแปร", "One-variable sweep");
+    label("sweep-field-label", "ตัวแปรที่กวาด", "Sweep variable");
+    showRangeLabels();
+    label("sweep-submit", "กวาดค่า", "Run sweep");
+    label("sweep-region-label", "เขตการทำงาน", "Region");
+    label("sweep-data-label", "ตารางข้อมูล", "Sample table");
+    label("sweep-lock", "เปิดเฉลยเพื่อใช้เครื่องมือกวาดค่า", "Reveal the answer to use the sweep.");
+    item("sweep-lock").hidden = !state.answersHidden;
+    item("sweep-body").hidden = state.answersHidden;
+    label("inverse-label", "ออกแบบย้อนกลับ · Emitter Bias", "Inverse design · Emitter Bias");
+    label("inverse-target-label", "IC เป้าหมาย (mA)", "Target IC (mA)");
+    label("inverse-submit", "หา RE", "Solve RE");
+    label("inverse-apply", "ใส่ RE ในวงจร", "Apply RE to circuit");
+    const blocked = state.answersHidden || mode !== "emitter";
+    if (state.answersHidden) label("inverse-lock", "เปิดเฉลยเพื่อใช้เครื่องมือออกแบบย้อนกลับ", "Reveal the answer to use inverse design.");
+    else label("inverse-lock", "เลือกวงจร Emitter Bias เพื่อหา RE จาก IC เป้าหมาย", "Choose Emitter Bias to find RE for a target IC.");
+    item("inverse-lock").hidden = !blocked;
+    item("inverse-body").hidden = blocked;
+    showSweep();
+    showInverse();
+  });
+})();
+(() => {
+  const lab = window.labWorkbench;
+  const {text} = lab;
+  const byId = id => document.getElementById(id);
+  const compareTools = byId("comparison-tools");
+  const recordTools = byId("record-tools");
+  const measurementKeys = ["VB", "VE", "VC", "IC", "VCE"];
+  const resultKeys = ["IC", "VCE", "VB", "VE", "VC", "IB", "IE"];
+  const measurements = new Map();
+  const modes = {
+    fixed: ["ไบอัสคงที่", "Fixed Bias"],
+    emitter: ["ไบอัสแบบมีตัวต้านทานอิมิตเตอร์", "Emitter Bias"],
+    divider: ["ไบอัสแบ่งแรงดัน", "Voltage Divider"],
+  };
+  let reference = null;
+
+  function make(tag, content = "") {
+    const node = document.createElement(tag);
+    node.textContent = content;
+    return node;
+  }
+
+  function button(id) {
+    const node = make("button");
+    node.type = "button";
+    node.id = id;
+    node.className = "record-button";
+    return node;
+  }
+
+  function table(title, headers, rows) {
+    const node = make("table");
+    node.className = "record-table";
+    node.setAttribute("aria-label", title);
+    const headings = node.createTHead().insertRow();
+    for (const label of headers) {
+      const th = make("th", label);
+      th.scope = "col";
+      headings.append(th);
+    }
+    const body = node.createTBody();
+    for (const [label, ...values] of rows) {
+      const row = body.insertRow();
+      const th = make("th", label);
+      th.scope = "row";
+      row.append(th);
+      for (const value of values) row.insertCell().append(value);
+    }
+    return node;
+  }
+
+  const format = (key, value) => Number.isFinite(value) ? lab.format(key, value) : "—";
+  const unit = key => key.startsWith("R") ? "kΩ" : key === "IC" ? "mA" : key === "β" ? "" : "V";
+  const suffix = key => unit(key) ? " " + unit(key) : "";
+  const modeName = mode => text(...modes[mode]);
+  const caseName = snapshot => /^A\d+\b/.test(snapshot.caseLabel)
+    ? snapshot.caseLabel : text("ค่าที่กรอกเอง", "Custom values");
+  const waiting = state => ["pending", "unavailable"].includes(state.region);
+
+  function delta(key, current, base) {
+    if (!Number.isFinite(current) || !Number.isFinite(base)) return "—";
+    const value = current - base;
+    return (value > 0 ? "+" : value < 0 ? "−" : "") + format(key, Math.abs(value));
+  }
+
+  function fieldValue(state, key) {
+    if (!Object.hasOwn(state.raw, key)) return "—";
+    return state.raw[key] === "" ? text("ว่าง", "Empty") : state.raw[key] + suffix(key);
+  }
+
+  function fieldChanged(current, base, key) {
+    if (Number.isFinite(current.inputs[key]) && Number.isFinite(base.inputs[key])) {
+      return current.inputs[key] !== base.inputs[key];
+    }
+    return current.raw[key] !== base.raw[key];
+  }
+
+  const saveReference = button("save-reference");
+  const clearReference = button("clear-reference");
+  const referenceSummary = make("div");
+  referenceSummary.id = "reference-summary";
+  const referenceActions = make("div");
+  referenceActions.className = "record-actions";
+  referenceActions.append(saveReference, clearReference);
+  compareTools.append(referenceActions, referenceSummary);
+
+  function renderReference(state) {
+    compareTools.hidden = state.answersHidden;
+    referenceSummary.replaceChildren();
+    if (state.answersHidden) return;
+    saveReference.textContent = reference
+      ? text("ใช้กรณีนี้แทนกรณีอ้างอิง", "Replace reference with current case")
+      : text("บันทึกกรณีนี้เป็นอ้างอิง", "Save current case as reference");
+    saveReference.disabled = measurementCase(state) === null || waiting(state);
+    clearReference.textContent = text("ล้างกรณีอ้างอิง", "Clear reference");
+    clearReference.hidden = !reference;
+    if (!reference) {
+      referenceSummary.append(make("p", text(
+        "บันทึกกรณีนี้ แล้วแก้ค่าหรือเปลี่ยนวงจรเพื่อเทียบผล",
+        "Save this case, then edit inputs or switch circuits to compare.")));
+      return;
+    }
+
+    const status = make("dl");
+    status.className = "record-reference-status";
+    for (const [name, snapshot, attribute] of [
+      [text("อ้างอิง", "Reference"), reference, "data-reference-region"],
+      [text("ปัจจุบัน", "Current"), state, "data-current-region"],
+    ]) {
+      const item = make("div");
+      item.append(make("dt", name), make("dd", modeName(snapshot.mode)), make("dd", caseName(snapshot)));
+      const region = make("dd", lab.regionText(snapshot.region));
+      region.setAttribute(attribute, snapshot.region);
+      item.append(region);
+      if (snapshot.issue) {
+        const issue = make("dd", snapshot.issue);
+        issue.lang = snapshot.locale;
+        item.append(issue);
+      }
+      status.append(item);
+    }
+
+    const sides = [text("อ้างอิง", "Reference"), text("ปัจจุบัน", "Current")];
+    const label = text("ค่า", "Quantity");
+    const changed = [...new Set([...lab.fieldKeys(reference.mode), ...lab.fieldKeys(state.mode)])]
+      .filter(key => fieldChanged(state, reference, key));
+    const changedHeading = make("h4", text("ค่าที่เปลี่ยน", "Changed inputs"));
+    const fields = changed.length
+      ? table(changedHeading.textContent, [label, ...sides], changed.map(key => {
+        const current = make("span", fieldValue(state, key));
+        current.dataset.referenceField = key;
+        return [lab.symbol(key), fieldValue(reference, key), current];
+      }))
+      : make("p", text("ค่าพารามิเตอร์เหมือนเดิม", "Parameter values are unchanged."));
+
+    const keys = [state.mode, reference.mode].includes("divider") ? [...resultKeys, "VTH", "RTH"] : resultKeys;
+    const deltaLabel = text("ปัจจุบัน − อ้างอิง", "Current − reference");
+    const values = table(deltaLabel, [label, ...sides, deltaLabel], keys.map(key => {
+      const previous = reference.readings[key];
+      const current = state.readings[key];
+      const difference = make("span", delta(key, current, previous));
+      difference.dataset.referenceDelta = key;
+      return [lab.symbol(key), format(key, previous), format(key, current), difference];
+    }));
+    referenceSummary.append(status, changedHeading, fields, values);
+  }
+
+  saveReference.addEventListener("click", () => {
+    const state = lab.state;
+    if (state.answersHidden || waiting(state) || measurementCase(state) === null) return;
+    const {mode, region, issue, caseLabel, locale} = state;
+    reference = {mode, region, issue, caseLabel, locale,
+      inputs: {...state.inputs}, raw: {...state.raw}, readings: {...state.readings}};
+    renderReference(state);
+  });
+  clearReference.addEventListener("click", () => {
+    reference = null;
+    renderReference(lab.state);
+    saveReference.focus();
+  });
+
+  function measurementCase(state) {
+    const values = lab.fieldKeys(state.mode).map(key => state.inputs[key]);
+    return values.every(Number.isFinite) ? JSON.stringify([state.mode, ...values]) : null;
+  }
+
+  function measurementDifference(state, key, value) {
+    return value === undefined ? "—" : delta(key, Number(value), state.readings[key]);
+  }
+
+  const measuredTitle = () => text("ผลวัดจากวงจรจริง", "Bench measurements");
+  const measurementHeaders = () => [
+    text("ค่า", "Quantity"), text("ค่าที่วัด", "Measured"), text("คำนวณ", "Calculated"),
+    text("วัด − โปรแกรม", "Measured − solver"),
+  ];
+  const measurementNote = () => text(
+    "แบบฟอร์มเก็บผลวัดตามชนิดวงจรและค่าพารามิเตอร์ขณะเปิดหน้านี้ เว้นช่องที่ยังไม่ได้วัด",
+    "Measurements stay with the circuit and parameter values while this page is open. Leave unmeasured values blank.");
+  const practiceNote = () => text("เปิดเฉลยก่อนบันทึกผลวัดหรือพิมพ์รายงาน", "Reveal the answer to record measurements or print the report.");
+  const waitingNote = () => text("รอผลคำนวณล่าสุดก่อนกรอกผลวัดหรือพิมพ์รายงาน", "Wait for current results to record measurements or print a report.");
+  const measureArea = make("div");
+  measureArea.id = "measurements";
+  const printButton = button("print-report");
+  recordTools.append(measureArea, printButton);
+
+  function measurementModels(state, key) {
+    const cell = make("div");
+    cell.className = "measurement-models";
+    for (const [label, result] of [
+      [text("คำนวณมือ", "Hand"), state.hand?.values?.[key]],
+      [text("โปรแกรม", "Solver"), state.readings[key]],
+    ]) {
+      const method = make("div");
+      method.append(make("small", label), make("span", format(key, result)));
+      cell.append(method);
+    }
+    return cell;
+  }
+
+  function renderMeasurements(state) {
+    printButton.hidden = state.answersHidden || waiting(state);
+    printButton.textContent = text("พิมพ์ / บันทึก PDF", "Print / save PDF");
+    measureArea.replaceChildren();
+    if (state.answersHidden || waiting(state)) {
+      measureArea.append(make("p", state.answersHidden ? practiceNote() : waitingNote()));
+      return;
+    }
+    const caseKey = measurementCase(state);
+    measureArea.append(make("h3", measuredTitle()));
+    if (caseKey === null) {
+      measureArea.append(make("p", text(
+        "กรอกค่าพารามิเตอร์ให้ครบเพื่อผูกผลวัดกับกรณีนี้",
+        "Enter valid parameters to attach measurements to this case.")));
+      return;
+    }
+
+    const values = measurements.get(caseKey) ?? {};
+    const note = make("p", measurementNote());
+    note.id = "measurement-note";
+    const fields = measurementKeys.map(key => {
+      const label = make("label");
+      label.className = "measurement-field";
+      const input = make("input");
+      input.type = "number";
+      input.step = "any";
+      input.inputMode = "decimal";
+      input.dataset.measurement = key;
+      input.value = values[key] ?? "";
+      input.setAttribute("aria-label", text("ค่าที่วัดของ ", "Measured ") + lab.symbol(key) + " (" + unit(key) + ")");
+      input.setAttribute("aria-describedby", note.id);
+      label.append(input, make("span", unit(key)));
+      label.lastElementChild.setAttribute("aria-hidden", "true");
+      const difference = make("output", measurementDifference(state, key, values[key]));
+      difference.dataset.measuredDelta = key;
+      input.addEventListener("input", () => {
+        const current = lab.state;
+        if (current.answersHidden || measurementCase(current) !== caseKey) return;
+        if (input.validity.badInput) input.setAttribute("aria-invalid", "true");
+        else input.removeAttribute("aria-invalid");
+        if (Number.isFinite(input.valueAsNumber)) values[key] = input.value;
+        else delete values[key];
+        if (Object.keys(values).length) measurements.set(caseKey, values);
+        else measurements.delete(caseKey);
+        difference.textContent = measurementDifference(current, key, values[key]);
+      });
+      return [lab.symbol(key), label, measurementModels(state, key), difference];
+    });
+    measureArea.append(note, table(measuredTitle(), measurementHeaders(), fields));
+  }
+
+  const printReport = make("article");
+  printReport.id = "print-lab-report";
+  document.body.append(printReport);
+
+  function printDiagram(state) {
+    const svg = byId("schematics-" + state.mode).content.querySelector("svg").cloneNode(true);
+    svg.id += "-report";
+    for (const node of svg.querySelectorAll("[id]")) node.id += "-report";
+    for (const attribute of ["aria-labelledby", "aria-describedby"]) {
+      if (svg.hasAttribute(attribute)) {
+        const ids = svg.getAttribute(attribute).split(/\s+/);
+        svg.setAttribute(attribute, ids.map(id => id + "-report").join(" "));
+      }
+    }
+    for (const span of svg.querySelectorAll("[data-input-key]")) {
+      const key = span.dataset.inputKey === "beta" ? "β" : span.dataset.inputKey.toUpperCase();
+      const value = state.inputs[key];
+      const raw = state.raw[key]?.trim();
+      span.textContent = Number.isFinite(value) ? (raw?.length <= 7 ? raw : Number(value.toPrecision(4)).toString()) : "—";
+    }
+    for (const reading of svg.querySelectorAll("[data-result-key]")) {
+      const key = reading.dataset.resultKey.split("_")[0];
+      reading.textContent = format(key, state.readings[key]);
+    }
+    return svg;
+  }
+
+  function printableList(id) {
+    const list = byId(id).cloneNode(true);
+    list.removeAttribute("id");
+    list.querySelectorAll("[id]").forEach(node => node.removeAttribute("id"));
+    list.querySelectorAll("button").forEach(node => node.replaceWith(...node.childNodes));
+    return list;
+  }
+
+  function renderPrint() {
+    const state = lab.state;
+    printReport.replaceChildren(make("h1", text("Lab 03 · รายงาน BJT DC Bias", "Lab 03 · BJT DC Bias Report")));
+    if (state.answersHidden || waiting(state)) {
+      printReport.append(make("p", state.answersHidden ? practiceNote() : waitingNote()));
+      return;
+    }
+
+    const caseHeading = make("p", modeName(state.mode) + " · " + caseName(state) + " · " + lab.regionText(state.region));
+    caseHeading.className = "report-case";
+    const fieldTitle = text("ค่าพารามิเตอร์", "Input parameters");
+    const valuesTitle = text("เทียบผลคำนวณสองวิธี", "Comparison of calculated values");
+    const quantity = text("ค่า", "Quantity");
+    const value = text("ค่าตัวเลข", "Value");
+    const overview = make("div");
+    overview.className = "report-overview";
+    const inputs = make("section");
+    inputs.append(make("h2", fieldTitle), table(fieldTitle, [quantity, value],
+      lab.fieldKeys(state.mode).map(key => [lab.symbol(key), fieldValue(state, key)])));
+    const circuit = make("section");
+    circuit.className = "report-circuit";
+    circuit.append(make("h2", text("วงจรที่ใช้คำนวณ", "Circuit used in calculation")), printDiagram(state));
+    overview.append(circuit, inputs);
+
+    const results = make("section");
+    results.append(make("h2", valuesTitle), table(valuesTitle, [
+      quantity, text("คำนวณมือ", "Hand calculation"), state.region === "mismatch"
+        ? text("ผลทดลอง Python · ยังไม่ยืนยัน", "Python trial · unconfirmed") : text("โปรแกรม Python", "Python solver"),
+    ],
+      (state.mode === "divider" ? [...resultKeys, "VTH", "RTH"] : resultKeys)
+        .map(key => [lab.symbol(key), format(key, state.hand?.values?.[key]), format(key, state.nodes?.[key])])));
+    const validation = byId("comparison-status").textContent;
+    if (validation) results.append(make("p", validation));
+    if (state.issue) results.append(make("p", state.issue));
+    for (const warning of state.warnings ?? []) if (warning !== state.issue) results.append(make("p", warning));
+
+    const measurement = make("section");
+    const measured = measurements.get(measurementCase(state)) ?? {};
+    measurement.append(make("h2", measuredTitle()));
+    if (Object.keys(measured).length) {
+      const [quantity, entered, , difference] = measurementHeaders();
+      measurement.append(table(measuredTitle(), [quantity, entered, text("คำนวณมือ", "Hand"), text("โปรแกรม", "Solver"), difference], measurementKeys.map(key => [
+        lab.symbol(key), measured[key] === undefined ? "—" : measured[key] + suffix(key),
+        format(key, state.hand?.values?.[key]), format(key, state.readings[key]), measurementDifference(state, key, measured[key]),
+      ])));
+    } else {
+      measurement.append(make("p", text("ยังไม่มีผลวัดสำหรับกรณีนี้", "No measurements recorded for this case.")));
+    }
+    const steps = printableList("steps");
+    const checks = printableList("circuit-checks");
+    printReport.append(caseHeading, overview, results);
+    if (steps.childElementCount) printReport.append(make("h2", text("ขั้นตอนคำนวณมือ", "Hand calculation")), steps);
+    if (checks.childElementCount) printReport.append(make("h2", text("ตรวจสมการและเขตการทำงาน", "Equation and region checks")), checks);
+    printReport.append(measurement, make("p", text(
+      "แบบจำลอง Forward Active ใช้ β และ VBE คงที่ ส่วน Cutoff และ Saturation ของวงจรแบ่งแรงดันเป็นค่าประมาณ",
+      "The Forward Active model assumes constant β and VBE. Divider Cutoff and Saturation are estimates.")));
+  }
+
+  printButton.addEventListener("click", () => {
+    if (!lab.state.answersHidden && !waiting(lab.state)) window.print();
+  });
+  window.addEventListener("beforeprint", renderPrint);
+  window.addEventListener("afterprint", () => printReport.replaceChildren());
+  document.addEventListener("workbench:render", ({detail}) => {
+    printReport.replaceChildren();
+    renderReference(detail);
+    renderMeasurements(detail);
+  });
+})();
+</script>
 </body>
 </html>
