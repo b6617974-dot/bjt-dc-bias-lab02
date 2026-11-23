@@ -7,22 +7,35 @@
 
 ## เตรียม ngspice และโมเดล
 
-1. ติดตั้ง ngspice แล้วทดสอบ `ngspice -v` ใน Terminal หาก Windows มีทั้ง `ngspice.exe` และ `ngspice_con.exe` ให้ใช้ตัว Console กับ Flask [ดาวน์โหลด ngspice](https://ngspice.sourceforge.io/download.html)
-2. เริ่มด้วย `deploy/profile.json` ซึ่งเลือกโมเดลสาธิตที่มาพร้อมโครงการ แล้วเปิด Flask ตามคำสั่งด้านล่าง
-3. เปิด **ตั้งค่า ngspice → ตรวจและเตรียม Starter Kit** แล้วกดตรวจ ผลที่พร้อมต้องอ่านแรงดัน 5 V จากวงจรแบ่งแรงดันทดสอบ และผ่านการจำลอง DC, AC, Transient
+### เปิดครั้งแรกบน Windows
+
+จากโฟลเดอร์ที่มี `app.py` สร้าง Python environment และเปิด Flask ได้ตั้งแต่ก่อนติดตั้ง ngspice
 
 ```powershell
-$env:LAB04_SPICE_PROFILE = (Resolve-Path 'deploy/profile.json').Path
-$env:LAB04_NGSPICE = 'C:/path/to/Spice64/bin/ngspice_con.exe'
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe -m flask --app app run --host 127.0.0.1 --port 8780
 ```
 
-ถ้า Terminal เรียก `ngspice` จาก `PATH` ได้ ให้ข้ามบรรทัดที่ตั้ง `LAB04_NGSPICE` บน macOS/Linux ใช้ `export LAB04_SPICE_PROFILE="$PWD/deploy/profile.json"` และใช้ `.venv/bin/python` ในคำสั่งติดตั้งและรัน
+1. เปิด [/spice](http://127.0.0.1:8780/spice) แล้วกาง **ตั้งค่า ngspice** ถ้ายังไม่มีเครื่องมือ ให้ดาวน์โหลดแพ็กเกจ Windows 64-bit แบบ `.7z` จากผู้พัฒนาและแตกไฟล์ด้วย 7-Zip ลงโฟลเดอร์ที่เขียนได้ เช่น `C:/tools` [ดาวน์โหลด ngspice](https://ngspice.sourceforge.io/download.html)
+2. สำหรับสาธิต ให้ใช้ `deploy/profile.json` ที่มีอยู่ หรือฝึกสร้างโปรไฟล์โดยเลือก `deploy/2n3904-oj.lib` ในแผงตั้งค่า ใส่ชื่อแสดงและแหล่งที่มา แล้วดาวน์โหลด `profile.json` เก็บข้างสำเนาไฟล์โมเดลนอก Git
+3. หยุด Flask ด้วย `Ctrl+C` ตั้งค่าด้านล่างใน PowerShell เดิม แล้วเปิด Flask ใหม่ แทนพาธ executable ด้วยตำแหน่งที่แตกไฟล์ ถ้า `ngspice -v` ใช้ได้จาก `PATH` อยู่แล้ว ให้ข้ามการตั้ง `LAB04_NGSPICE` และเรียก `ngspice -v` โดยตรง
+4. กลับไปที่ **ตั้งค่า ngspice** แล้วกด **ทดสอบความพร้อม** ตรวจว่าขั้นเวอร์ชัน วงจรแบ่งแรงดัน 5 V และ DC, AC, Transient ขึ้น `PASS`
+
+```powershell
+$env:LAB04_SPICE_PROFILE = (Resolve-Path 'deploy/profile.json').Path
+$env:LAB04_NGSPICE = 'C:/tools/Spice64/bin/ngspice_con.exe'
+& $env:LAB04_NGSPICE -v
+.\.venv\Scripts\python.exe -m flask --app app run --host 127.0.0.1 --port 8780
+```
+
+ถ้าสร้างโปรไฟล์เอง ให้แทนพาธ `deploy/profile.json` ด้วยไฟล์ที่ดาวน์โหลดไว้ บน macOS/Linux ให้ติดตั้งด้วย Homebrew หรือตัวจัดการแพ็กเกจของระบบ ทดสอบ `ngspice -v` ตั้ง `export LAB04_SPICE_PROFILE="$PWD/deploy/profile.json"` และใช้ `.venv/bin/python` ในคำสั่งติดตั้งและรัน
+
+### เปลี่ยนเป็นโมเดลของผู้สอน
 
 - เมื่อได้ **โมเดลที่ผู้สอนยืนยัน** ให้เปิดแผงตั้งค่า เลือกไฟล์โมเดล ตั้งประเภทชุดผู้สอน กรอกแหล่งที่มา และเลือกชื่อ declaration เว็บอ่านไฟล์ในเบราว์เซอร์เพื่อสร้าง `profile.json` และ SHA-256 จัดเก็บโปรไฟล์ข้างไฟล์โมเดล ตั้ง `LAB04_SPICE_PROFILE` ไปยังโปรไฟล์นั้น เปิด Flask ใหม่ และกดตรวจอีกครั้ง
 - สำหรับ `.SUBCKT` สามขา ให้กรอก B/C/E ตามลำดับจริงจากเอกสารของโมเดล สำหรับ `.cir` หรือ Starter Adapter ที่มีวงจรทั้งชุด ให้ทวน topology, หน่วย, โหนดและเวกเตอร์ก่อนเชื่อม ทดสอบทั้งสาม analysis ด้วยชุดนั้นก่อนใช้อ้างอิงส่งตรวจ
+- ดู [ตารางตรวจ Starter Kit จากใบงาน §04](docs/validation.md#starter-kit) เพื่อเทียบสิ่งที่ได้รับจากผู้สอนกับวงจรและผลรุ่นสาธิต
 - ตั้ง `LAB04_EVIDENCE_DIR` เป็นไดเรกทอรีภายนอก Git เฉพาะช่วงเก็บหลักฐาน เพื่อเก็บ Netlist, raw และ log แยกตามรหัสรัน การคำนวณตามปกติใช้ไดเรกทอรีชั่วคราว
 - AC ใช้ small-signal excitation ของตัวเอง ส่วนความถี่และแอมพลิจูดของ SIN ใช้กับ Transient ช่วงความถี่สัญญาณสำหรับ Transient คือ 1 Hz–10 kHz เพื่อจำกัดขนาดข้อมูลตามช่วงเวลาและ time step
 - ถ้าติดตั้ง ngspice ไม่สำเร็จ ให้ใช้ [รุ่นออนไลน์](https://bjt-workbench-lab04.vercel.app/spice) สำหรับการสาธิต หรือใช้โหมดคำนวณมือ DC Bias ขณะตรวจตำแหน่ง executable หากชื่อโมเดลหรือ SHA-256 ไม่ตรง ให้ทวนไฟล์กับต้นทางก่อนสร้างโปรไฟล์ใหม่
