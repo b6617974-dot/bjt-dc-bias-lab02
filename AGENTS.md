@@ -1,10 +1,15 @@
-# Lab 02 Repository Conventions
+# Lab 04 Repository Conventions
 
 This is a bounded student laboratory exercise, **not a general electronics simulation platform**.
 
 ## File and submission contract
 
-The only tracked paths permitted for this exercise are:
+The Lab 04 branch preserves the Lab 03 file contract and adds the following exercise files:
+
+- `spice_engine.py` and `tests/test_spice_engine.py`
+- `templates/spice.html`, `static/spice.css`, and `static/spice.js`
+
+The preceding labs use these paths:
 
 - `app.py`
 - `dc_bias.py`
@@ -28,6 +33,8 @@ Do not commit extra source files, generated HTML/image assets, screenshots, cach
 - `app.py`: validate HTTP input, convert kΩ to Ω exactly once, format results once for HTML and JSON.
 - `templates/index.html`: accessible layout, precise **inline SVG**, and presentation-only inline JavaScript; never calculate transistor physics here.
 - `static/style.css`: responsive presentation without external JS, image, CSS or font dependencies.
+- `spice_engine.py`: validate CE inputs, select the server-side model, construct the approved circuit, run ngspice, and return checked quantities in SI.
+- `templates/spice.html` and its local assets: render the validated solver data and identify the source, model, units, and run.
 
 Keep the active, cutoff and saturation assumptions explicit. If a model is not physically consistent, return `outside_model`, not a false numerical Q-point. Passing equation checks is not proof of SPICE-equivalent accuracy.
 

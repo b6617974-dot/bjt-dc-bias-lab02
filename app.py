@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from fractions import Fraction
 from math import isclose, isfinite, ulp
+from os import getenv
 
 from flask import Flask, jsonify, render_template, request
 
@@ -13,6 +14,7 @@ from dc_bias import (
     calculate_by_mode, calculate_reference, emitter_resistance_for_current, validate_bias_inputs,
     validate_emitter_bias_inputs, validate_fixed_bias_inputs,
 )
+from spice_engine import FIELD_SPECS as SPICE_FIELDS, SpiceError, simulate
 
 
 DEFAULT_FORM = {
@@ -367,6 +369,11 @@ def _tool_error(code, errors, *, status=422, **details):
 
 def create_app() -> Flask:
     application = Flask(__name__)
+    application.config.update(
+        LAB04_SPICE_PROFILE=getenv("LAB04_SPICE_PROFILE"),
+        LAB04_NGSPICE=getenv("LAB04_NGSPICE"),
+        LAB04_EVIDENCE_DIR=getenv("LAB04_EVIDENCE_DIR"),
+    )
 
     def render_form(mode, values, *, calculate=True, errors=None):
         point = params = None
@@ -430,6 +437,30 @@ def create_app() -> Flask:
             return jsonify(_response_data(point))
         values = {name: str(payload[name]).strip() for name in MODE_DEFAULTS[mode]}
         return jsonify(_view_state(point, params, mode, values, {}))
+
+    @application.get("/spice")
+    def spice_workbench():
+        return render_template("spice.html", field_specs=SPICE_FIELDS)
+
+    @application.post("/api/spice")
+    def simulate_spice():
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or set(payload) != {"analysis", "inputs"}:
+            return jsonify(ok=False, code="request", message="ส่ง analysis และ inputs เป็น JSON",
+                           fields={}), 400
+        try:
+            result = simulate(
+                payload["analysis"], payload["inputs"],
+                profile_path=application.config["LAB04_SPICE_PROFILE"],
+                executable=application.config["LAB04_NGSPICE"],
+                evidence_dir=application.config["LAB04_EVIDENCE_DIR"],
+            )
+        except SpiceError as error:
+            status = {"input": 422, "profile": 503, "engine": 503, "timeout": 504,
+                      "solver": 502, "output": 502}.get(error.code, 500)
+            return jsonify(ok=False, code=error.code, message=error.message,
+                           fields=error.fields or {}), status
+        return jsonify(result)
 
     @application.post("/api/sweep")
     def sweep_json():

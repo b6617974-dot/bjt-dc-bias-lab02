@@ -2,9 +2,11 @@
 
 import unittest
 from dataclasses import replace
+from unittest.mock import patch
 
 from app import build_calculation, create_app, parse_inputs
 from dc_bias import calculate_bias
+from spice_engine import FIELD_SPECS, SpiceError
 
 
 DEFAULT = {
@@ -435,3 +437,45 @@ class WorkbenchExperimentTests(unittest.TestCase):
                 response = self.client.post(route, json=payload)
                 self.assertEqual(response.status_code, 400)
                 self.assertEqual(response.get_json()["code"], "request")
+
+
+class Lab04RouteTests(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app()
+        self.app.config.update(TESTING=True, LAB04_SPICE_PROFILE="profile.json",
+                               LAB04_NGSPICE="ngspice", LAB04_EVIDENCE_DIR=None)
+        self.client = self.app.test_client()
+        self.inputs = {key: field[2] for key, field in FIELD_SPECS.items()
+                       if key not in {"amp", "freq"}}
+
+    def test_initial_page_has_no_solver_result_and_lab03_is_available(self):
+        page = self.client.get("/spice")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"/static/spice.js", page.data)
+        self.assertIn(b'name="re"', page.data)
+        self.assertEqual(self.client.get("/").status_code, 200)
+
+    def test_route_uses_server_settings_and_forwards_checked_data(self):
+        result = {"ok": True, "analysis": "dc", "run_id": "test-run", "data": {"point": {}}}
+        with patch("app.simulate", return_value=result) as engine:
+            response = self.client.post("/api/spice", json={"analysis": "dc", "inputs": self.inputs})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), result)
+        engine.assert_called_once_with("dc", self.inputs, profile_path="profile.json",
+                                       executable="ngspice", evidence_dir=None)
+
+    def test_route_rejects_attempt_to_select_an_arbitrary_profile(self):
+        response = self.client.post("/api/spice", json={
+            "analysis": "dc", "inputs": self.inputs, "profile_path": "alternate.json",
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["code"], "request")
+
+    def test_engine_errors_return_no_success_payload(self):
+        for code, status in (("profile", 503), ("engine", 503), ("timeout", 504), ("output", 502)):
+            with self.subTest(code=code), patch("app.simulate", side_effect=SpiceError(code, "error")):
+                response = self.client.post("/api/spice", json={"analysis": "ac", "inputs": self.inputs})
+                self.assertEqual(response.status_code, status)
+                self.assertEqual(response.get_json(), {
+                    "ok": False, "code": code, "message": "error", "fields": {},
+                })

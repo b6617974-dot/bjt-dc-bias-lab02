@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lab 04 · BJT Amplifier Workbench</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='spice.css') }}">
+  <script src="{{ url_for('static', filename='spice.js') }}" defer></script>
+</head>
+<body>
+{% macro circuit() %}
+<svg class="schematic" viewBox="0 0 560 290" role="img"
+     aria-label="วงจรขยาย NPN แบบคอมมอนอีมิตเตอร์ แบ่งแรงดันที่ฐานและวัด Vout หลัง Cout">
+  <g class="trace">
+    <path d="M155 44H360M260 44V27 M155 44v27l0 7 -7 4 14 6 -14 6 14 6 -14 6 7 4 0 5
+             M155 115v50h125 M360 44v27l0 7 -7 4 14 6 -14 6 14 6 -14 6 7 4 0 5
+             M360 115v15h-38l-42 28 M280 147v39m0-12 42 18h38v8
+             l0 7 -7 4 14 6 -14 6 14 6 -14 6 7 4 0 5 V253m-10 0h20m-16 5h12m-9 5h6
+             M155 165l0 7 -7 4 14 6 -14 6 14 6 -14 6 7 4 0 5V253m-10 0h20m-16 5h12m-9 5h6"/>
+    <circle cx="303" cy="169" r="37"/>
+    <polygon class="npn-arrow" points="318,190.286 304.882,190.430 309.058,180.687"/>
+  </g>
+  <g class="trace signal">
+    <path d="M50 165H99m12 0h44M99 152v26m12-26v26M50 165v30m0 30v28
+             m-10 0h20m-16 5h12m-9 5h6M40 210q5-9 10 0t10 0
+             M360 130h61m11 0h67v53M421 117v26m11-26v26M499 183
+             l0 7 -7 4 14 6 -14 6 14 6 -14 6 7 4 0 5v26m-10 0h20m-16 5h12m-9 5h6"/>
+    <circle cx="50" cy="210" r="15"/>
+  </g>
+  <g class="nodes">
+    <circle cx="50" cy="165" r="5" data-node="vin"><title>Vin ก่อน Cin</title></circle>
+    <circle cx="155" cy="165" r="5" data-node="vb"><title>ฐาน B</title></circle>
+    <circle cx="360" cy="130" r="5" data-node="vc"><title>คอลเลกเตอร์ C</title></circle>
+    <circle cx="360" cy="192" r="5" data-node="ve"><title>อีมิตเตอร์ E</title></circle>
+    <circle cx="499" cy="130" r="5" data-node="vout"><title>Vout หลัง Cout</title></circle>
+  </g>
+  <g class="schematic-labels">
+    <text x="271" y="31" data-part="vcc">VCC</text>
+    <text x="170" y="96" data-part="r1">R1</text><text x="170" y="213" data-part="r2">R2</text>
+    <text x="376" y="94" data-part="rc">RC</text><text x="376" y="240" data-part="re">RE</text>
+    <text x="253" y="236">Q1 · NPN</text><text x="24" y="147">Vin</text>
+    <text x="77" y="124" data-part="cin">Cin</text><text x="429" y="158" text-anchor="middle" data-part="cout">Cout</text>
+    <text x="498" y="106" text-anchor="middle">Vout</text><text x="484" y="209" text-anchor="end" data-part="rl">RL</text>
+  </g>
+</svg>
+{% endmacro %}
+<div class="shell">
+  <header class="mast">
+    <a href="/spice" class="brand" aria-label="หน้าเริ่มต้น Lab 04">
+      <span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-6 4 12 3-6h4"/></svg></span>
+      ENG29 2121
+    </a>
+    <nav class="labs" aria-label="เลือกโปรแกรม">
+      <a href="/">คำนวณ Bias · Lab 03</a>
+      <a href="/spice" aria-current="page">จำลอง CE · Lab 04</a>
+    </nav>
+  </header>
+  <main>
+    <header class="intro">
+      <div><h1>BJT Amplifier Workbench</h1><p>วงจรขยายคอมมอนอีมิตเตอร์แบบแบ่งแรงดัน</p></div>
+      <span class="solver-label">ngspice</span>
+    </header>
+    <noscript><p class="notice">เปิด JavaScript เพื่อรัน ngspice และอ่านกราฟ <a href="/">เปิดเครื่องคำนวณ Bias ของ Lab 03</a></p></noscript>
+    <div class="workspace">
+      <section class="panel inputs" id="inputs" aria-labelledby="input-heading">
+        <header class="panel-title"><h2 id="input-heading">ตั้งค่าวงจร</h2></header>
+        <form id="form" class="panel-body" novalidate>
+          <div class="fields">
+            {% for key in ('vcc', 'r1', 'r2', 'rc', 're', 'rl', 'cin', 'cout') %}
+            {% set label, unit, default = field_specs[key] %}
+            <div class="field-wrap">
+              <label class="field" for="input-{{ key }}"><span>{{ label }}</span>
+                <input id="input-{{ key }}" name="{{ key }}" type="number" step="any" inputmode="decimal"
+                       value="{{ default }}" aria-describedby="unit-{{ key }} error-{{ key }}" required>
+                <span class="unit" id="unit-{{ key }}">{{ unit }}</span>
+              </label>
+              <small class="field-error" id="error-{{ key }}" hidden></small>
+            </div>
+            {% endfor %}
+          </div>
+          <fieldset id="signal-inputs" hidden disabled>
+            <legend>สัญญาณเข้า · SIN</legend>
+            <div class="fields">
+              {% for key in ('amp', 'freq') %}
+              {% set label, unit, default = field_specs[key] %}
+              <div class="field-wrap">
+                <label class="field" for="input-{{ key }}"><span>{{ label }}</span>
+                  <input id="input-{{ key }}" name="{{ key }}" type="number" step="any" inputmode="decimal"
+                         value="{{ default }}" aria-describedby="unit-{{ key }} error-{{ key }}" required>
+                  <span class="unit" id="unit-{{ key }}">{{ unit }}</span>
+                </label>
+                <small class="field-error" id="error-{{ key }}" hidden></small>
+              </div>
+              {% endfor %}
+            </div>
+          </fieldset>
+          <div class="actions">
+            <button class="primary" id="run" type="submit" disabled>รันการจำลอง</button>
+            <button id="reset" type="button">คืนค่า</button>
+          </div>
+          <label class="live-edit"><input type="checkbox" id="live-edit" checked> อัปเดตอัตโนมัติเมื่อแก้ค่า</label>
+        </form>
+      </section>
+      <section class="panel circuit" id="circuit" aria-labelledby="circuit-heading">
+        <header class="panel-title">
+          <h2 id="circuit-heading">วงจรอ้างอิง</h2>
+          <button id="zoom" type="button">ขยายวงจร</button>
+        </header>
+        <div id="schematic">{{ circuit() }}</div>
+        <div class="circuit-foot">
+          <div id="probes" class="group" role="group" aria-label="เลือกจุดวัด">
+            <button type="button" data-probe="vb" aria-pressed="false">B</button>
+            <button type="button" data-probe="vc" aria-pressed="false">C</button>
+            <button type="button" data-probe="ve" aria-pressed="false">E</button>
+            <button type="button" data-probe="vin" aria-pressed="false">Vin</button>
+            <button type="button" data-probe="vout" aria-pressed="true">Vout</button>
+          </div>
+          <output id="probe-reading" class="readout" aria-live="off">Vout · —</output>
+        </div>
+      </section>
+      <section class="panel view" aria-labelledby="view-title">
+        <header class="panel-title">
+          <h2 id="view-title">ผลการจำลอง</h2>
+          <div class="analysis group" id="analysis" role="group" aria-label="วิธีวิเคราะห์">
+            <button type="button" data-analysis="dc" aria-pressed="false">DC</button>
+            <button type="button" data-analysis="ac" aria-pressed="true">AC</button>
+            <button type="button" data-analysis="tran" aria-pressed="false">Transient</button>
+          </div>
+        </header>
+        <div class="panel-body">
+          <div class="run-state">
+            <span id="status" data-state="idle" role="status" aria-live="polite">ยังไม่รัน</span>
+            <span id="model-label" hidden></span>
+          </div>
+          <ul id="run-warnings" class="warnings" hidden></ul>
+          <div class="playback" id="playback" hidden>
+            <button id="play" type="button" aria-pressed="false">▶ เล่นกราฟ</button>
+            <label for="cursor">จุดอ่านกราฟ <input id="cursor" type="range" min="0" max="0" value="0"></label>
+            <output id="cursor-value" class="readout" aria-live="off"></output>
+          </div>
+          <div id="result" aria-busy="false"><p class="empty">ปรับค่า แล้วกดรันการจำลองเพื่อดูผล</p></div>
+        </div>
+      </section>
+      <section class="panel tools" aria-labelledby="tools-heading">
+        <header class="panel-title"><h2 id="tools-heading">ตรวจผลและเก็บหลักฐาน</h2></header>
+        <div class="panel-body tools-grid">
+          <details id="method">
+            <summary>วิธีอ่านผล</summary>
+            <div class="detail-body">
+              <p id="method-body"></p>
+              <details id="dc-checks" hidden>
+                <summary>สมการและค่าคลาดเคลื่อนจาก solver</summary>
+                <p class="formulas">V<sub>CE</sub> = V<sub>C</sub> − V<sub>E</sub><br>
+                I<sub>B</sub> ≈ (V<sub>CC</sub> − V<sub>B</sub>) / R<sub>1</sub> − V<sub>B</sub> / R<sub>2</sub><br>
+                I<sub>C</sub> ≈ (V<sub>CC</sub> − V<sub>C</sub>) / R<sub>C</sub><br>
+                I<sub>E</sub> ≈ V<sub>E</sub> / R<sub>E</sub> ≈ I<sub>B</sub> + I<sub>C</sub></p>
+                <dl id="check-values" class="facts"></dl>
+              </details>
+            </div>
+          </details>
+          <details id="source">
+            <summary>ข้อมูลการรันและโมเดล</summary>
+            <div class="detail-body"><dl class="facts" id="provenance"></dl></div>
+          </details>
+          <details id="notebook">
+            <summary>ปักจุด เทียบสองรอบ และส่งออก</summary>
+            <div class="detail-body">
+              <div class="group">
+                <button id="pin-point" type="button" disabled>ปักจุดอ่าน</button>
+                <button id="save-run" type="button" disabled>เก็บรอบนี้</button>
+                <button id="clear-runs" type="button" disabled>ล้างรอบที่เก็บ</button>
+                <button id="download-csv" type="button" disabled>ดาวน์โหลด CSV</button>
+              </div>
+              <p id="pinned" class="muted" role="status"></p>
+              <div id="saved" aria-live="polite"></div>
+            </div>
+          </details>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+<dialog id="circuit-dialog" aria-labelledby="zoom-heading">
+  <header class="panel-title"><h2 id="zoom-heading">วงจรอ้างอิงแบบขยาย</h2><form method="dialog"><button>ปิด</button></form></header>
+  <div class="zoom-region" tabindex="0" aria-label="เลื่อนดูวงจร">{{ circuit() }}</div>
+</dialog>
+</body>
+</html>

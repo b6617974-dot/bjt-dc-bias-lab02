@@ -1,4 +1,43 @@
-# ENG29 2121 Lab 03 โปรแกรมไบอัสทรานซิสเตอร์ BJT
+# ENG29 2121 Lab 04 · BJT CE Amplifier Simulator
+
+Lab 04 ใช้ Flask เรียก **ngspice** เพื่อวิเคราะห์วงจร NPN Common-Emitter Voltage Divider แบบไม่มี emitter bypass capacitor หน้า [Lab 04](http://127.0.0.1:8780/spice) แสดงผล DC, Bode และ Transient จากแต่ละรอบรัน พร้อมโมเดล หน่วย และรหัสรัน หน้า [Lab 03](http://127.0.0.1:8780/) เป็นเครื่องคำนวณ Analytical DC Bias ทั้งสามแบบพร้อมสมการคำนวณมือ
+
+## เตรียม ngspice และโมเดล
+
+1. ติดตั้ง ngspice จาก [ผู้พัฒนา ngspice](https://ngspice.sourceforge.io/download.html) ทดสอบ `ngspice --version` ใน Terminal หาก Windows มีทั้ง `ngspice.exe` และ `ngspice_con.exe` ให้ใช้ตัว Console `ngspice_con.exe` กับ Flask
+2. วางไฟล์โมเดลที่ได้รับจากผู้สอนในโฟลเดอร์ภายนอก Git หากยังไม่มี ให้ดาวน์โหลด [2N3904 จาก onsemi](https://www.onsemi.com/pub/Collateral/2N3904.SP3) เพื่อทดลองด้วยโมเดลชั่วคราว บันทึก SHA-256 จากไฟล์ที่ดาวน์โหลด รอบอ้างอิงใช้ `ba63b85c254f6fc90e1ccd89ae70b9cc9ee1ada7ba4875f3bb22f1431999d503`
+3. สร้าง `profile.json` ไว้ข้างไฟล์โมเดลตามตัวอย่างนี้ แล้วกำหนดตำแหน่งจาก Terminal เดียวกับที่เปิด Flask
+
+```json
+{
+  "id": "onsemi-2n3904",
+  "name": "onsemi 2N3904",
+  "classification": "provisional",
+  "source": "https://www.onsemi.com/pub/Collateral/2N3904.SP3",
+  "model_file": "2N3904.SP3",
+  "model_name": "2n3904",
+  "sha256": "ba63b85c254f6fc90e1ccd89ae70b9cc9ee1ada7ba4875f3bb22f1431999d503",
+  "kind": "model"
+}
+```
+
+```powershell
+$env:LAB04_SPICE_PROFILE = 'C:/path/to/profile.json'
+$env:LAB04_NGSPICE = 'C:/path/to/Spice64/bin/ngspice_con.exe'
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m flask --app app run --host 127.0.0.1 --port 8780
+```
+
+ถ้า Terminal เรียก `ngspice` จาก `PATH` ได้อยู่แล้ว ให้ตั้งเฉพาะ `LAB04_SPICE_PROFILE` บน macOS/Linux ใช้ `export LAB04_SPICE_PROFILE=/path/to/profile.json` และเรียก `.venv/bin/python` แทน Python ในตัวอย่าง Windows เปิด [หน้า CE Simulator](http://127.0.0.1:8780/spice) แล้วเลือก DC, AC หรือ Transient และกด Run
+
+- สลับไปใช้ชุดผู้สอนด้วยค่าตั้งใหม่ที่ระบุแหล่งที่มาและ `classification: instructor` แล้วเปิด Flask ใหม่ สำหรับ subcircuit สามขาใช้ `kind: subckt` พร้อม `pins` เรียงตาม declaration ของชุดนั้น เช่น `["E","C","B"]` เฉพาะเมื่อเอกสารของชุดนั้นระบุลำดับ E, C, B จริง หากได้รับ Netlist หรือ adapter ทั้งชุด ให้ทวนวงจรและจับคู่ชื่อเวกเตอร์ก่อนเชื่อมเข้าตัวอ่านผล
+- ตั้ง `LAB04_EVIDENCE_DIR` เป็นไดเรกทอรีภายนอก Git เฉพาะช่วงเก็บหลักฐาน เพื่อเก็บ Netlist, raw และ log แยกตามรหัสรัน การคำนวณตามปกติใช้ไดเรกทอรีชั่วคราว
+- AC ใช้ small-signal excitation ของตัวเอง ส่วนความถี่และแอมพลิจูดของ SIN ใช้กับ Transient ช่วงความถี่สัญญาณสำหรับ Transient คือ 1 Hz–10 kHz เพื่อจำกัดขนาดข้อมูลตามช่วงเวลาและ time step
+- ถ้าหน้าเว็บแจ้งว่าเรียก ngspice ไม่ได้ ให้ทดสอบ executable ด้วย `-v` ใน Terminal เดียวกับ Flask และตรวจตำแหน่ง `LAB04_NGSPICE` ถ้าโมเดลไม่พร้อม ให้ตรวจ `LAB04_SPICE_PROFILE`, เส้นทาง `model_file`, ชื่อ declaration และ SHA-256 แล้วเปิด Flask ใหม่ หน้า Lab 03 ยังเปิดได้ระหว่างนี้
+- ตรวจซ้ำจากโฟลเดอร์โครงการด้วย `.\.venv\Scripts\python.exe -m unittest discover -s tests -v` บน Windows หรือ `.venv/bin/python -m unittest discover -s tests -v` บน macOS/Linux ตั้งค่า ngspice และโมเดลไว้ก่อนเพื่อให้การทดสอบที่เรียก solver จริงทำงานครบ เทียบค่ากับ [บันทึกการตรวจ](docs/validation.md)
+
+## Lab 03 · โปรแกรมไบอัสทรานซิสเตอร์ BJT
 
 โปรแกรม Flask คำนวณจุดทำงาน DC ของทรานซิสเตอร์ NPN ใน **Fixed Bias**, **Emitter Bias** แบบแหล่งจ่ายเดียว และ **Voltage Divider Bias** หน้าจอ Workbench A แสดงวงจร ผลคำนวณ สมการแทนค่า และตารางเทียบกับค่าอ้างอิงจากสมการโหนด
 
