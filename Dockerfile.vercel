@@ -1,0 +1,65 @@
+# syntax=docker/dockerfile:1
+FROM python:3.12.16-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df AS base
+
+FROM base AS ngspice-build
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential bison flex ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+# SHA-256 published on the upstream ngspice 47 download page.
+RUN curl --fail --show-error --silent --location --retry 3 --proto '=https' --proto-redir '=https' \
+      https://downloads.sourceforge.net/project/ngspice/ng-spice-rework/47/ngspice-47.tar.gz \
+      --output ngspice-47.tar.gz \
+    && printf '%s\n' '894e649651f1838a14095e5a5439e7d3aa63e87ede14d283173fda4fcdef675f  ngspice-47.tar.gz' | sha256sum --check \
+    && tar -xzf ngspice-47.tar.gz
+
+WORKDIR /build/ngspice-47
+RUN ./configure --prefix=/opt/ngspice --without-x --with-readline=no --with-fftw3=no \
+      --enable-xspice --disable-osdi --disable-cider --disable-klu --disable-openmp --disable-debug \
+    && make -j2 \
+    && make install \
+    && install -D -m 0644 COPYING /opt/ngspice/share/doc/ngspice/COPYING
+
+FROM base AS runtime
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=8080 \
+    LAB04_MODE=hosted \
+    LAB04_NGSPICE=/opt/ngspice/bin/ngspice \
+    LAB04_SPICE_PROFILE=/app/deploy/profile.json \
+    LAB04_VERIFICATION_FILE=/app/deploy/spice-verification.json
+
+WORKDIR /app
+COPY requirements.txt ./
+RUN python -m pip install --no-cache-dir -r requirements.txt \
+      Flask==3.1.3 Werkzeug==3.1.9 blinker==1.9.0 click==8.5.1 \
+      itsdangerous==2.2.0 jinja2==3.1.6 markupsafe==3.0.4 \
+      gunicorn==27.0.1 packaging==26.2
+
+COPY --from=ngspice-build /opt/ngspice/ /opt/ngspice/
+COPY app.py dc_bias.py spice_engine.py ./
+COPY static/style.css static/spice.css static/spice.js ./static/
+COPY templates/index.html templates/spice.html ./templates/
+COPY deploy/profile.json deploy/2n3904-oj.lib ./deploy/
+
+# Use the actual solver and configured model to generate a hosted readiness record.
+RUN python - <<'PY'
+import json
+import os
+from pathlib import Path
+
+from spice_engine import check_setup
+
+executable = os.environ["LAB04_NGSPICE"]
+report = check_setup(profile_path=os.environ["LAB04_SPICE_PROFILE"], executable=executable)
+if not report["ok"] or report["engine_version"] != "47":
+    raise SystemExit(json.dumps(report, allow_nan=False))
+stored = {**report, "executable": str(Path(executable).resolve(strict=True))}
+Path(os.environ["LAB04_VERIFICATION_FILE"]).write_text(json.dumps(stored, allow_nan=False) + "\n", encoding="utf-8")
+print(json.dumps(report, allow_nan=False))
+PY
+
+USER 10001:10001
+EXPOSE 8080
+CMD ["sh", "-c", "exec gunicorn --bind \"0.0.0.0:${PORT:-8080}\" --workers 1 --threads 4 --timeout 35 app:app"]

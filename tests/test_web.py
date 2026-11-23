@@ -2,6 +2,7 @@
 
 import unittest
 from dataclasses import replace
+from threading import BoundedSemaphore, Lock
 from unittest.mock import patch
 
 from app import build_calculation, create_app, parse_inputs
@@ -443,7 +444,7 @@ class Lab04RouteTests(unittest.TestCase):
     def setUp(self):
         self.app = create_app()
         self.app.config.update(TESTING=True, LAB04_SPICE_PROFILE="profile.json",
-                               LAB04_NGSPICE="ngspice", LAB04_EVIDENCE_DIR=None)
+                               LAB04_NGSPICE="ngspice", LAB04_EVIDENCE_DIR=None, LAB04_MODE="local")
         self.client = self.app.test_client()
         self.inputs = {key: field[2] for key, field in FIELD_SPECS.items()
                        if key not in {"amp", "freq"}}
@@ -471,6 +472,28 @@ class Lab04RouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.get_json()["code"], "request")
 
+    def test_design_route_bounds_request_to_server_configured_search(self):
+        request = {"inputs": self.inputs, "target_gain_db": 5, "max_ic_ma": 1.5}
+        result = {"ok": True, "evaluated": 9, "total": 9, "candidates": []}
+        with patch("app.design_search", return_value=result) as search:
+            response = self.client.post("/api/spice/design", json=request)
+            invalid = self.client.post("/api/spice/design", json=dict(request, profile_path="other.json"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), result)
+        search.assert_called_once_with(self.inputs, 5, 1.5, profile_path="profile.json",
+                                       executable="ngspice", evidence_dir=None)
+        self.assertEqual(invalid.status_code, 400)
+
+    def test_design_route_distinguishes_invalid_target_from_missing_solver(self):
+        request = {"inputs": self.inputs, "target_gain_db": 4, "max_ic_ma": False}
+        response = self.client.post("/api/spice/design", json=request)
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("max_ic_ma", response.get_json()["fields"])
+        with patch("app.design_search", side_effect=SpiceError("engine", "Unavailable.")):
+            response = self.client.post("/api/spice/design", json=dict(request, max_ic_ma=1))
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()["code"], "engine")
+
     def test_engine_errors_return_no_success_payload(self):
         for code, status in (("profile", 503), ("engine", 503), ("timeout", 504), ("output", 502)):
             with self.subTest(code=code), patch("app.simulate", side_effect=SpiceError(code, "error")):
@@ -479,3 +502,77 @@ class Lab04RouteTests(unittest.TestCase):
                 self.assertEqual(response.get_json(), {
                     "ok": False, "code": code, "message": "error", "fields": {},
                 })
+
+    def test_setup_check_requires_loopback_same_origin_and_empty_json(self):
+        url = "/api/spice/check"
+        with patch("app.check_setup", return_value={"ok": False, "steps": []}) as check:
+            attempts = (
+                {"base_url": "http://workbench.invalid"},
+                {"environ_overrides": {"REMOTE_ADDR": "192.0.2.1"}},
+                {"headers": {"Origin": "http://another-origin.invalid"}},
+            )
+            for options in attempts:
+                with self.subTest(options=options):
+                    forbidden = self.client.post(url, json={}, **options)
+                    self.assertEqual(forbidden.status_code, 403)
+                    self.assertTrue(forbidden.cache_control.no_store)
+            self.assertEqual(self.client.post(url, json={"executable": "another"}).status_code, 400)
+            self.assertEqual(self.client.post(url, data="{}").status_code, 400)
+            check.assert_not_called()
+            checked = self.client.post(url, base_url="http://localhost:8780", json={},
+                                       headers={"Origin": "http://localhost:8780"})
+            self.assertEqual(checked.status_code, 200)
+            self.assertFalse(checked.json["ok"])
+            self.assertTrue(checked.cache_control.no_store)
+            check.assert_called_once_with(profile_path="profile.json", executable="ngspice", evidence_dir=None)
+
+        self.app.config["LAB04_MODE"] = "hosted"
+        self.assertEqual(self.client.post(url, json={}).status_code, 403)
+
+    def test_setup_busy_guard_preserves_in_progress_check(self):
+        locked = Lock()
+        with locked, patch("app._SETUP_LOCK", locked), patch("app.check_setup") as check:
+            response = self.client.post("/api/spice/check", json={})
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json["code"], "busy")
+            self.assertTrue(locked.locked())
+            check.assert_not_called()
+
+    def test_setup_status_only_displays_hosted_build_receipt_and_valid_commit(self):
+        readiness = {"engine": {"status": "available"}, "profile": {"status": "available"}}
+        receipt = {"source": "build", "engine_version": "47", "steps": []}
+        self.app.config.update(LAB04_MODE="hosted", LAB04_DEPLOYMENT_COMMIT="a" * 40,
+                               LAB04_VERIFICATION_FILE="trusted-receipt.json")
+        with patch("app.setup_status", return_value=readiness), patch("app.verified_setup_status", return_value=receipt) as reader:
+            response = self.client.get("/api/spice/status")
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.cache_control.no_store)
+            self.assertEqual(response.json, {**readiness, "mode": "hosted", "commit": "a" * 40,
+                                            "version": "47", "verification": receipt})
+            reader.assert_called_once_with("trusted-receipt.json", readiness["profile"], executable="ngspice")
+            self.app.config.update(LAB04_MODE="local", LAB04_DEPLOYMENT_COMMIT="invalid")
+            self.assertEqual(self.client.get("/api/spice/status").json, {**readiness, "mode": "local"})
+            reader.assert_called_once()
+
+    def test_hosted_runtime_bounds_payload_and_response_and_avoids_local_evidence(self):
+        with patch.dict("os.environ", {"LAB04_MODE": "hosted"}):
+            hosted = create_app()
+        hosted.config.update(TESTING=True, LAB04_EVIDENCE_DIR="private-evidence")
+        client = hosted.test_client()
+        request = {"analysis": "dc", "inputs": self.inputs}
+        with patch("app.simulate", return_value={"ok": True}) as engine:
+            oversized = client.post("/api/spice", json={**request, "padding": "x" * 17 * 1024})
+            self.assertEqual(oversized.status_code, 413)
+            self.assertEqual(oversized.json["code"], "payload_too_large")
+            engine.assert_not_called()
+            with patch("app._HOSTED_SOLVER_SLOTS", BoundedSemaphore(0)):
+                busy = client.post("/api/spice", json=request)
+            self.assertEqual(busy.status_code, 429)
+            self.assertEqual(busy.headers["Retry-After"], "2")
+            engine.assert_not_called()
+            with patch("app._HOSTED_RESULT_LIMIT", 1):
+                response = client.post("/api/spice", json=request)
+            self.assertEqual(response.status_code, 502)
+            self.assertEqual(response.json["code"], "output")
+            self.assertIsNone(engine.call_args.kwargs["evidence_dir"])
+            self.assertEqual(client.post("/api/spice", json=request).status_code, 200)

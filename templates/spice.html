@@ -1,9 +1,9 @@
-<!doctype html>
+{% from 'index.html' import schematic with context %}<!doctype html>
 <html lang="th">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Lab 04 · BJT Amplifier Workbench</title>
+  <title>Lab 03–04 · BJT Workbench</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='spice.css') }}">
   <script src="{{ url_for('static', filename='spice.js') }}" defer></script>
 </head>
@@ -46,38 +46,155 @@
 {% endmacro %}
 <div class="shell">
   <header class="mast">
-    <a href="/spice" class="brand" aria-label="หน้าเริ่มต้น Lab 04">
+    <a href="{{ url_for('spice_workbench') }}" class="brand" aria-label="หน้าเริ่มต้น BJT Workbench">
       <span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-6 4 12 3-6h4"/></svg></span>
       ENG29 2121
     </a>
-    <nav class="labs" aria-label="เลือกโปรแกรม">
-      <a href="/">คำนวณ Bias · Lab 03</a>
-      <a href="/spice" aria-current="page">จำลอง CE · Lab 04</a>
+    <nav class="analysis group" id="analysis" aria-label="วิธีวิเคราะห์">
+      <button type="button" data-analysis="dc" aria-pressed="true">DC Bias</button>
+      <button type="button" data-analysis="ac" aria-pressed="false">AC</button>
+      <button type="button" data-analysis="tran" aria-pressed="false">Transient</button>
     </nav>
   </header>
   <main>
     <header class="intro">
-      <div><h1>BJT Amplifier Workbench</h1><p>วงจรขยายคอมมอนอีมิตเตอร์แบบแบ่งแรงดัน</p></div>
-      <span class="solver-label">ngspice</span>
+      <div><h1>BJT Workbench</h1><p>ตั้งไบอัส แล้วดูว่าวงจรตอบสนองต่อสัญญาณอย่างไร</p></div>
+      <a class="solver-label" href="{{ url_for('index') }}">Lab 03 · แบบฝึกและการทดลองเดิม</a>
     </header>
     <noscript><p class="notice">เปิด JavaScript เพื่อรัน ngspice และอ่านกราฟ <a href="/">เปิดเครื่องคำนวณ Bias ของ Lab 03</a></p></noscript>
+    <details class="panel setup-panel" id="spice-setup">
+      <summary>
+        <span>ตั้งค่า ngspice</span>
+        <span id="setup-indicator" class="setup-badge" data-state="pending" aria-live="polite">กำลังอ่านสถานะ</span>
+      </summary>
+      <div class="setup-body">
+        <div class="setup-status">
+          <h2>สถานะเครื่องจำลอง</h2>
+          <div class="group">
+            <button type="button" id="setup-refresh">อ่านสถานะใหม่</button>
+            <button type="button" id="setup-check" class="setup-primary" hidden>ทดสอบความพร้อม</button>
+          </div>
+          <dl id="setup-facts" class="facts"></dl>
+          <p id="setup-read-message" class="muted" role="status"></p>
+          <p id="setup-check-message" class="muted" role="status"></p>
+          <p id="setup-report-source" class="muted" hidden>ผลตรวจตอนสร้างรุ่น</p>
+          <ul id="setup-steps" class="setup-steps" aria-label="ผลตรวจรายขั้น" hidden></ul>
+          <p id="setup-hosted-note" class="muted" hidden>ผู้ดูแลรุ่นออนไลน์เป็นผู้เลือก ngspice และโมเดลของระบบ เปิดแท็บ DC, AC หรือ Transient เพื่อทดลองได้จากเบราว์เซอร์</p>
+        </div>
+        <div id="setup-local" class="setup-local" hidden>
+          <div>
+            <h2>1. ติดตั้งบนเครื่องที่รัน Workbench</h2>
+            <p>ดาวน์โหลด ngspice จาก <a href="https://ngspice.sourceforge.io/download.html">เว็บไซต์ของผู้พัฒนา</a> บน Windows ใช้รุ่น portable แล้วแตกไฟล์ไว้ในโฟลเดอร์ที่เข้าถึงได้ บน macOS ใช้ Homebrew และบน Ubuntu/Debian ใช้ตัวจัดการแพ็กเกจของระบบ</p>
+          </div>
+          <div>
+            <h2>2. เตรียมโปรไฟล์โมเดล</h2>
+            <p>ใช้โมเดลจากผู้สอนที่ทราบแหล่งที่มา หรือ <a href="https://www.onsemi.com/pub/Collateral/2N3904.SP3">onsemi 2N3904</a> สำหรับสาธิตบนเครื่อง ไฟล์ที่เลือกจะอยู่ในเบราว์เซอร์เพื่ออ่านชื่อโมเดลและคำนวณ SHA-256</p>
+            <form id="setup-profile-form">
+              <label for="setup-model-file">ไฟล์โมเดล .MODEL NPN หรือ .SUBCKT สามขา</label>
+              <input type="file" id="setup-model-file" aria-describedby="setup-profile-message">
+              <div id="setup-model-fields" hidden>
+                <div class="records-form">
+                  <label>ชื่อที่แสดง <input type="text" id="setup-model-label" maxlength="120" required></label>
+                  <label>แหล่งที่มา <input type="text" id="setup-model-source" maxlength="250" placeholder="เช่น ลิงก์ต้นทางหรือชื่อชุดผู้สอน" required></label>
+                  <label>ชื่อ declaration <select id="setup-model-declaration" required></select></label>
+                  <label>ประเภทโปรไฟล์
+                    <select id="setup-classification">
+                      <option value="provisional">ชั่วคราว / สาธิต</option>
+                      <option value="instructor">ไฟล์ที่ได้รับจากผู้สอน</option>
+                    </select>
+                  </label>
+                </div>
+                <p id="setup-instructor-note" class="muted" hidden>เลือกประเภทนี้ตามแหล่งที่มาของไฟล์ ผลตรวจวงจรและความพร้อมจะขึ้นหลังรันชุดตรวจ</p>
+                <fieldset id="setup-pin-field" hidden>
+                  <legend>จับคู่ขา .SUBCKT ตามลำดับในไฟล์</legend>
+                  <div class="records-form" id="setup-pin-options"></div>
+                  <label class="live-edit"><input id="setup-pin-confirm" type="checkbox"> ยืนยันผัง B, C และ E ตามข้อมูลผู้สอนหรือผู้ผลิต</label>
+                </fieldset>
+                <div id="setup-manual-hash" hidden>
+                  <label for="setup-hash-input">ค่า SHA-256 ของไฟล์</label>
+                  <input type="text" id="setup-hash-input" maxlength="64" autocomplete="off" spellcheck="false">
+                  <p class="muted">แทน MODEL_FILE ด้วยชื่อไฟล์ที่เลือก แล้วใช้ <code>Get-FileHash -Algorithm SHA256 -LiteralPath '.\MODEL_FILE'</code> ใน PowerShell, <code>shasum -a 256 'MODEL_FILE'</code> บน macOS หรือ <code>sha256sum 'MODEL_FILE'</code> บน Linux</p>
+                </div>
+                <p class="muted" id="setup-hash-value"></p>
+                <button type="submit" id="setup-profile-download" disabled>ดาวน์โหลด profile.json</button>
+              </div>
+              <p id="setup-profile-message" class="muted" role="status"></p>
+            </form>
+          </div>
+          <div>
+            <h2>3. เปิด Flask ใหม่และกลับมากดทดสอบ</h2>
+            <p>วาง <code>profile.json</code> กับไฟล์โมเดลในโฟลเดอร์เดียวกันนอก Git แทนค่าพาธในตัวอย่าง แล้วเปิด Flask จากโฟลเดอร์โปรเจกต์ที่ติดตั้ง Python dependencies แล้ว</p>
+            <details id="setup-windows">
+              <summary>Windows · PowerShell</summary>
+              <div class="detail-body">
+                <p class="muted">ถ้า <code>ngspice -v</code> ใช้ได้แล้ว ข้ามบรรทัด LAB04_NGSPICE ได้</p>
+                <pre id="setup-windows-command"><code>$env:LAB04_SPICE_PROFILE = 'C:\path\to\models\profile.json'
+$env:LAB04_NGSPICE = 'C:\path\to\Spice64\bin\ngspice_con.exe'
+$solver = if ($env:LAB04_NGSPICE) { $env:LAB04_NGSPICE } else { 'ngspice' }
+&amp; $solver -v
+.\.venv\Scripts\python.exe -m flask --app app run --host 127.0.0.1 --port 8780</code></pre>
+                <button type="button" data-copy-setup="setup-windows-command">คัดลอกคำสั่ง Windows</button>
+              </div>
+            </details>
+            <details id="setup-unix">
+              <summary>macOS / Linux</summary>
+              <div class="detail-body">
+                <pre id="setup-unix-command"><code># macOS: brew install ngspice
+# Ubuntu/Debian: sudo apt install ngspice
+ngspice -v
+export LAB04_SPICE_PROFILE="/path/to/models/profile.json"
+.venv/bin/python -m flask --app app run --host 127.0.0.1 --port 8780</code></pre>
+                <button type="button" data-copy-setup="setup-unix-command">คัดลอกคำสั่ง macOS / Linux</button>
+              </div>
+            </details>
+            <p id="setup-copy-message" class="muted" role="status"></p>
+            <p class="muted">ถ้าเครื่องนี้ติดตั้งไม่สำเร็จ ใช้รุ่น portable บน Windows หรือเปิดจากเครื่องแลปที่ตั้งค่าครบ ระหว่างเตรียมเครื่องใช้ <a href="{{ url_for('index') }}">เครื่องคำนวณมือ Lab 03</a> ได้</p>
+          </div>
+        </div>
+      </div>
+    </details>
     <div class="workspace">
+      <div class="workbench-sidebar">
       <section class="panel inputs" id="inputs" aria-labelledby="input-heading">
-        <header class="panel-title"><h2 id="input-heading">ตั้งค่าวงจร</h2></header>
+        <header class="panel-title">
+          <h2 id="input-heading">ตั้งค่าวงจร</h2>
+          <select id="bias-mode" aria-label="วงจรไบอัส">
+            <option value="divider">Voltage Divider</option>
+            <option value="fixed">Fixed Bias</option>
+            <option value="emitter">Emitter Bias</option>
+          </select>
+        </header>
         <form id="form" class="panel-body" novalidate>
+          <p id="bias-mode-note" class="muted" hidden>ต้องการดูกราฟ AC หรือ Transient ให้เลือก Voltage Divider</p>
           <div class="fields">
-            {% for key in ('vcc', 'r1', 'r2', 'rc', 're', 'rl', 'cin', 'cout') %}
-            {% set label, unit, default = field_specs[key] %}
-            <div class="field-wrap">
+            {% for key in ('vcc', 'r1', 'r2', 'rb', 'rc', 're', 'rl', 'cin', 'cout') %}
+            {% set label, unit, default = field_specs[key] if key in field_specs else ('RB', 'kΩ', bias_defaults.fixed.rb) %}
+            <div class="field-wrap"{% if key == 'rb' %} hidden{% endif %}>
               <label class="field" for="input-{{ key }}"><span>{{ label }}</span>
                 <input id="input-{{ key }}" name="{{ key }}" type="number" step="any" inputmode="decimal"
-                       value="{{ default }}" aria-describedby="unit-{{ key }} error-{{ key }}" required>
+                       value="{{ default }}" aria-describedby="unit-{{ key }} error-{{ key }}" required{% if key == 'rb' %} disabled{% endif %}>
                 <span class="unit" id="unit-{{ key }}">{{ unit }}</span>
               </label>
               <small class="field-error" id="error-{{ key }}" hidden></small>
             </div>
             {% endfor %}
           </div>
+          <details id="bias-assumptions">
+            <summary>สมมติฐานคำนวณมือ</summary>
+            <div class="fields">
+              {% for key in ('beta', 'vbe') %}
+              {% set label, unit = bias_fields[key] %}
+              <div class="field-wrap">
+                <label class="field" for="input-{{ key }}"><span>{{ label }}</span>
+                  <input id="input-{{ key }}" name="{{ key }}" type="number" step="any" inputmode="decimal"
+                         value="{{ bias_defaults.divider[key] }}" aria-describedby="unit-{{ key }} error-{{ key }}" required>
+                  <span class="unit" id="unit-{{ key }}">{{ unit or 'ไร้หน่วย' }}</span>
+                </label>
+                <small class="field-error" id="error-{{ key }}" hidden></small>
+              </div>
+              {% endfor %}
+            </div>
+          </details>
           <fieldset id="signal-inputs" hidden disabled>
             <legend>สัญญาณเข้า · SIN</legend>
             <div class="fields">
@@ -107,6 +224,11 @@
           <button id="zoom" type="button">ขยายวงจร</button>
         </header>
         <div id="schematic">{{ circuit() }}</div>
+        {% for mode in ('fixed', 'emitter') %}
+        <div id="diagram-{{ mode }}" hidden class="bias-schematic">
+          {{ schematic(mode, 'bias-' ~ mode, bias_defaults[mode], {}) }}
+        </div>
+        {% endfor %}
         <div class="circuit-foot">
           <div id="probes" class="group" role="group" aria-label="เลือกจุดวัด">
             <button type="button" data-probe="vb" aria-pressed="false">B</button>
@@ -118,14 +240,11 @@
           <output id="probe-reading" class="readout" aria-live="off">Vout · —</output>
         </div>
       </section>
+      </div>
       <section class="panel view" aria-labelledby="view-title">
         <header class="panel-title">
-          <h2 id="view-title">ผลการจำลอง</h2>
-          <div class="analysis group" id="analysis" role="group" aria-label="วิธีวิเคราะห์">
-            <button type="button" data-analysis="dc" aria-pressed="false">DC</button>
-            <button type="button" data-analysis="ac" aria-pressed="true">AC</button>
-            <button type="button" data-analysis="tran" aria-pressed="false">Transient</button>
-          </div>
+          <h2 id="view-title">จุดทำงาน DC</h2>
+          <button id="baseline-toggle" type="button" aria-pressed="false" disabled>เทียบกับค่าฐาน</button>
         </header>
         <div class="panel-body">
           <div class="run-state">
@@ -133,12 +252,37 @@
             <span id="model-label" hidden></span>
           </div>
           <ul id="run-warnings" class="warnings" hidden></ul>
+          <p id="baseline-summary" class="comparison-note" role="status" hidden></p>
           <div class="playback" id="playback" hidden>
             <button id="play" type="button" aria-pressed="false">▶ เล่นกราฟ</button>
             <label for="cursor">จุดอ่านกราฟ <input id="cursor" type="range" min="0" max="0" value="0"></label>
             <output id="cursor-value" class="readout" aria-live="off"></output>
           </div>
           <div id="result" aria-busy="false"><p class="empty">ปรับค่า แล้วกดรันการจำลองเพื่อดูผล</p></div>
+          <details id="measure-panel" hidden>
+            <summary>วัดจากกราฟ</summary>
+            <div class="detail-body">
+              <div class="group">
+                <button id="pin-point" type="button" disabled>ปักจุด A</button>
+                <button id="measure-auto" type="button">วัดอัตโนมัติ</button>
+                <button id="zoom-range" type="button" disabled>ซูมช่วง A–B</button>
+                <button id="zoom-reset" type="button" hidden>กลับทั้งกราฟ</button>
+              </div>
+              <p id="pinned" class="muted" role="status"></p>
+              <p id="measurement-result" class="readout" aria-live="off"></p>
+              <p id="automatic-result" class="muted" role="status"></p>
+            </div>
+          </details>
+          <section id="analytical-box" class="analytical" aria-labelledby="analytical-title" hidden>
+            <h3 id="analytical-title">คำนวณมือ · Lab 03</h3>
+            <p id="analytical-status" class="muted"></p>
+            <div id="analytical-cards"></div>
+            <details id="analytical-worked">
+              <summary>สมการแทนค่าและผลเทียบ</summary>
+              <button id="formula-circuit" type="button" aria-label="ขยายวงจรประกอบสมการ"></button>
+              <ol id="analytical-steps" class="worked-steps" tabindex="0" aria-label="เลื่อนอ่านสมการแทนค่า"></ol>
+            </details>
+          </section>
         </div>
       </section>
       <section class="panel tools" aria-labelledby="tools-heading">
@@ -163,16 +307,36 @@
             <div class="detail-body"><dl class="facts" id="provenance"></dl></div>
           </details>
           <details id="notebook">
-            <summary>ปักจุด เทียบสองรอบ และส่งออก</summary>
+            <summary>เก็บผลและเปิดกลับมาทดลอง</summary>
             <div class="detail-body">
+              <div class="records-form">
+                <label>ชื่อการทดลอง <input id="experiment-name" maxlength="80" placeholder="เช่น RE 2 kΩ"></label>
+                <label>โน้ต <input id="experiment-note" maxlength="240"></label>
+                <label>รอบที่เก็บ <select id="saved-experiments" aria-label="เลือกรอบที่เก็บ"></select></label>
+              </div>
               <div class="group">
-                <button id="pin-point" type="button" disabled>ปักจุดอ่าน</button>
                 <button id="save-run" type="button" disabled>เก็บรอบนี้</button>
+                <button id="restore-run" type="button" disabled>เปิดรอบที่เลือก</button>
                 <button id="clear-runs" type="button" disabled>ล้างรอบที่เก็บ</button>
                 <button id="download-csv" type="button" disabled>ดาวน์โหลด CSV</button>
+                <button id="export-run" type="button" disabled>ไฟล์หลักฐาน</button>
+                <button id="export-graph" type="button" disabled>รูปกราฟ SVG</button>
+                <button id="print-report" type="button" disabled>พิมพ์รายงาน / PDF</button>
               </div>
-              <p id="pinned" class="muted" role="status"></p>
               <div id="saved" aria-live="polite"></div>
+            </div>
+          </details>
+          <details id="design">
+            <summary>ออกแบบให้เข้าเป้า</summary>
+            <div class="detail-body">
+              <p class="muted">อัตราขยายที่ 1 kHz และเพดานกระแสคอลเลกเตอร์ โปรแกรมจะลองเฉพาะ RC กับ RE</p>
+              <div class="records-form">
+                <label>Gain ขั้นต่ำ (dB) <input id="target-gain" type="number" step="any" inputmode="decimal" value="4"></label>
+                <label>IC สูงสุด (mA) <input id="target-current" type="number" step="any" inputmode="decimal" value="1.5"></label>
+              </div>
+              <button id="design-run" type="button">ค้นหาชุดค่าจาก ngspice</button>
+              <p id="design-status" class="muted" role="status"></p>
+              <div id="design-results"></div>
             </div>
           </details>
         </div>
@@ -182,7 +346,8 @@
 </div>
 <dialog id="circuit-dialog" aria-labelledby="zoom-heading">
   <header class="panel-title"><h2 id="zoom-heading">วงจรอ้างอิงแบบขยาย</h2><form method="dialog"><button>ปิด</button></form></header>
-  <div class="zoom-region" tabindex="0" aria-label="เลื่อนดูวงจร">{{ circuit() }}</div>
+  <div class="zoom-region" id="zoom-diagram" tabindex="0" aria-label="เลื่อนดูวงจร"></div>
 </dialog>
+<script id="workbench-settings" type="application/json">{{ {'bias_defaults': bias_defaults, 'spice_fields': field_specs}|tojson }}</script>
 </body>
 </html>

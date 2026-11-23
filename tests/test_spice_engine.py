@@ -22,7 +22,11 @@ from spice_engine import (
     _netlist,
     _parse_inputs,
     _read_raw,
+    check_setup,
+    design_search,
+    setup_status,
     simulate,
+    verified_setup_status,
 )
 
 
@@ -128,6 +132,84 @@ class SpiceValidationTests(unittest.TestCase):
                     _load_profile(path)
                 self.assertEqual(raised.exception.code, "profile")
 
+    def test_setup_status_rejects_invalid_profiles_without_starting_solver(self):
+        with tempfile.TemporaryDirectory() as location, patch("spice_engine._invoke") as invoke:
+            directory = Path(location)
+            path = _write_profile(directory)
+            executable = directory / "missing-ngspice"
+            original = json.loads(path.read_text(encoding="utf-8"))
+
+            def status():
+                return setup_status(profile_path=path, executable=executable)
+
+            actual = status()
+            self.assertEqual(actual["engine"], {"status": "unavailable", "resolution": None, "code": "engine_missing"})
+            self.assertEqual(actual["profile"]["sha256"], original["sha256"])
+            self.assertNotIn("model_file", actual["profile"])
+            self.assertNotIn(str(directory), json.dumps(actual))
+            for filename in ("../model.lib", "sub/model.lib", "..\\model.lib", "C:\\model.lib", str(directory / "model.lib")):
+                with self.subTest(filename=filename):
+                    path.write_text(json.dumps(dict(original, model_file=filename)), encoding="utf-8")
+                    self.assertEqual(status()["profile"]["code"], "model_path")
+            path.write_text(json.dumps(dict(original, model_file="absent.lib")), encoding="utf-8")
+            self.assertEqual(status()["profile"]["code"], "model_missing")
+            path.write_text(json.dumps(dict(original, sha256="0" * 64)), encoding="utf-8")
+            self.assertEqual(status()["profile"]["code"], "model_checksum")
+            child = _write_profile(directory, ".SUBCKT TEST C B E\n.ENDS TEST\n", kind="subckt", name="TEST", pins=["B", "B", "E"])
+            self.assertEqual(child, path)
+            self.assertEqual(status()["profile"]["code"], "model_pins")
+            path.write_text(" " * (64 * 1024 + 1), encoding="utf-8")
+            self.assertEqual(status()["profile"]["code"], "profile_invalid")
+            path.write_text(json.dumps(original), encoding="utf-8")
+            (directory / "model.lib").write_bytes(b"*" * (1024 * 1024 + 1))
+            self.assertEqual(status()["profile"]["code"], "model_too_large")
+            invoke.assert_not_called()
+
+    def test_hosted_receipt_is_sanitized_and_bound_to_its_model_and_mode_checks(self):
+        profile = {"status": "available", "name": "Fixture", "sha256": "f" * 64,
+                   "kind": "subckt", "model_name": "LABTEST", "pins": ["C", "B", "E"],
+                   "classification": "provisional"}
+        steps = [{"id": "version", "status": "PASS", "version": "47"}]
+        steps.extend({"id": stage, "status": "PASS", "run_id": str(i) * 32}
+                     for i, stage in enumerate(("divider", "dc", "ac", "tran")))
+        steps[1]["value_v"] = 5.0
+        steps[1]["file"] = "private-path"
+        report = {"ok": True, "profile": profile, "engine_version": "47", "steps": steps,
+                  "executable": "/private-engine-path"}
+        with tempfile.TemporaryDirectory() as location, patch(
+            "spice_engine._solver_path", side_effect=lambda path: path or "/private-engine-path"
+        ):
+            path = Path(location) / "report.json"
+            path.write_text(json.dumps(report), encoding="utf-8")
+            verified = verified_setup_status(path, profile)
+            self.assertEqual(verified["source"], "build")
+            self.assertEqual([step["id"] for step in verified["steps"]], ["version", "divider", "dc", "ac", "tran"])
+            self.assertNotIn("private-path", json.dumps(verified))
+            self.assertNotIn("private-engine-path", json.dumps(verified))
+            self.assertIsNone(verified_setup_status(path, profile, executable="/different-engine"))
+            self.assertIsNone(verified_setup_status(path, dict(profile, pins=["B", "C", "E"])))
+            self.assertIsNone(verified_setup_status(path, dict(profile, sha256="a" * 64)))
+            for field, value in (("status", "FAIL"), ("run_id", "not-a-run-id"), ("value_v", 4.9)):
+                with self.subTest(field=field):
+                    changed = [steps[0], dict(steps[1], **{field: value}), *steps[2:]]
+                    path.write_text(json.dumps(dict(report, steps=changed)), encoding="utf-8")
+                    self.assertIsNone(verified_setup_status(path, profile))
+
+    def test_setup_rejects_a_model_symlink_that_resolves_outside_its_profile_folder(self):
+        with tempfile.TemporaryDirectory() as location:
+            outer = Path(location)
+            directory = outer / "profile"
+            directory.mkdir()
+            profile = _write_profile(directory)
+            original_model = directory / "model.lib"
+            outside = original_model.rename(outer / "model.lib")
+            try:
+                original_model.symlink_to(outside)
+            except (NotImplementedError, OSError) as error:
+                self.skipTest(f"Symbolic links are unavailable: {type(error).__name__}")
+            result = setup_status(profile_path=profile)
+            self.assertEqual(result["profile"], {"status": "unavailable", "code": "model_path"})
+
     def test_raw_rejects_wrong_analysis_missing_values_and_invalid_vectors(self):
         with tempfile.TemporaryDirectory() as location:
             path = Path(location) / "run.raw"
@@ -180,8 +262,151 @@ class SpiceValidationTests(unittest.TestCase):
         self.assertEqual(timeout.exception.code, "timeout")
 
 
+class DesignSearchTests(unittest.TestCase):
+    def setUp(self):
+        self.inputs = {key: value for key, value in _DEFAULTS.items() if key not in {"amp", "freq"}}
+        self.provenance = {
+            "ngspice_version": "test-version", "sha256": "0" * 64, "model_name": "LABTEST",
+            "name": "Design search fixture", "classification": "provisional",
+        }
+        self.dc = {
+            "provenance": self.provenance, "run_id": "dc-fixture", "warnings": [],
+            "data": {"point": {"vb_v": 2, "ve_v": 1.2, "vc_v": 8, "ib_a": 1e-5, "ic_a": 0.001}},
+        }
+        self.ac = {
+            "provenance": self.provenance, "run_id": "ac-fixture", "warnings": [],
+            "data": {"samples": [{"frequency_hz": 1000, "gain_db": 5}]},
+        }
+
+    def test_invalid_target_or_input_are_rejected_before_the_solver(self):
+        for inputs, gain, cap, field in (
+            (self.inputs, "5", 1.5, "target_gain_db"),
+            (self.inputs, math.inf, 1.5, "target_gain_db"),
+            (self.inputs, False, 1.5, "target_gain_db"),
+            (self.inputs, 5, 0, "max_ic_ma"),
+            (dict(self.inputs, re=0), 5, 1.5, "re"),
+        ):
+            with self.subTest(field=field), self.assertRaises(SpiceError) as raised:
+                design_search(inputs, gain, cap)
+            self.assertEqual(raised.exception.code, "input")
+            self.assertIn(field, raised.exception.fields)
+
+    def test_completed_pair_is_retained_but_timeout_is_marked_partial(self):
+        timeout = SpiceError("timeout", "Budget expired.")
+        with (
+            tempfile.TemporaryDirectory() as location,
+            patch("spice_engine._solver_path", return_value="controlled-test"),
+            patch("spice_engine._run_simulation", side_effect=[self.dc, self.ac, timeout]) as run,
+        ):
+            result = design_search(self.inputs, 6, 1.5, profile_path=_write_profile(Path(location)))
+        self.assertTrue(result["partial"])
+        self.assertEqual((result["evaluated"], result["total"], result["eligible"]), (1, 9, 1))
+        candidate, = result["candidates"]
+        self.assertFalse(candidate["passed"])
+        self.assertEqual((candidate["gain_db"], candidate["ic_ma"]), (5, 1))
+        self.assertEqual((candidate["dc_run_id"], candidate["ac_run_id"]), ("dc-fixture", "ac-fixture"))
+        self.assertEqual([call.args[0] for call in run.call_args_list], ["dc", "ac", "dc"])
+        self.assertEqual(len({call.kwargs["deadline"] for call in run.call_args_list}), 1)
+        self.assertIs(run.call_args_list[0].args[2], run.call_args_list[1].args[2])
+
+    def test_bad_bias_excludes_candidates_without_running_ac(self):
+        dc = dict(self.dc, data={"point": {**self.dc["data"]["point"], "vc_v": 1}})
+        with (
+            tempfile.TemporaryDirectory() as location,
+            patch("spice_engine._solver_path", return_value="controlled-test"),
+            patch("spice_engine._run_simulation", return_value=dc) as run,
+        ):
+            result = design_search(self.inputs, 4, 1.5, profile_path=_write_profile(Path(location)))
+        self.assertEqual((result["evaluated"], result["total"], result["eligible"]), (9, 9, 0))
+        self.assertFalse(result["partial"])
+        self.assertEqual(result["candidates"], [])
+        self.assertTrue(all(call.args[0] == "dc" for call in run.call_args_list))
+
+    def test_missing_frequency_and_changed_solver_abort_the_search(self):
+        for ac, code in (
+            (dict(self.ac, data={"samples": [{"frequency_hz": 999, "gain_db": 5}]}), "output"),
+            (dict(self.ac, provenance=dict(self.provenance, ngspice_version="different")), "engine"),
+        ):
+            with (
+                self.subTest(code=code),
+                tempfile.TemporaryDirectory() as location,
+                patch("spice_engine._solver_path", return_value="controlled-test"),
+                patch("spice_engine._run_simulation", side_effect=[self.dc, ac]),
+                self.assertRaises(SpiceError) as raised,
+            ):
+                design_search(self.inputs, 4, 1.5, profile_path=_write_profile(Path(location)))
+            self.assertEqual(raised.exception.code, code)
+
+
 @unittest.skipUnless(_EXECUTABLE, "Set LAB04_NGSPICE or add ngspice to PATH for real solver tests.")
 class RealSpiceTests(unittest.TestCase):
+    def test_setup_uses_real_divider_and_default_ce_and_preserves_no_model_state(self):
+        with tempfile.TemporaryDirectory() as location:
+            directory = Path(location)
+            report = check_setup(executable=_EXECUTABLE, profile_path=_write_profile(directory), evidence_dir=directory)
+            self.assertTrue(report["ok"])
+            receipts = [step["run_id"] for step in report["steps"][1:]]
+            self.assertEqual(len(set(receipts)), 4)
+            self.assertEqual([step["status"] for step in report["steps"]], ["PASS"] * 5)
+            self.assertAlmostEqual(report["steps"][1]["value_v"], 5.0)
+            for run_id in receipts:
+                self.assertTrue((directory / run_id / "run.raw").is_file())
+                self.assertTrue((directory / run_id / "circuit.cir").is_file())
+            no_model = check_setup(executable=_EXECUTABLE)
+            self.assertEqual(no_model["profile"]["code"], "profile_unconfigured")
+            self.assertEqual([step["status"] for step in no_model["steps"]], ["PASS", "PASS", "NOT RUN", "NOT RUN", "NOT RUN"])
+            self.assertFalse(no_model["ok"])
+
+    def test_setup_reports_first_solver_failure_and_does_not_claim_later_steps(self):
+        with tempfile.TemporaryDirectory() as location, patch(
+            "spice_engine._run_simulation", side_effect=SpiceError("timeout", "test fixture")
+        ) as engine:
+            report = check_setup(executable=_EXECUTABLE, profile_path=_write_profile(Path(location)))
+        self.assertFalse(report["ok"])
+        self.assertEqual([step["status"] for step in report["steps"]], ["PASS", "PASS", "FAIL", "NOT RUN", "NOT RUN"])
+        self.assertEqual(report["steps"][2]["code"], "timeout")
+        engine.assert_called_once()
+
+    def test_setup_rejects_a_real_but_incorrect_divider_reading(self):
+        incorrect = """Fixture: differs from the reference supply
+VSUPPLY in 0 DC 8
+RUPPER in out 1k
+RLOWER out 0 1k
+.op
+.save v(out)
+.end
+"""
+        with patch("spice_engine._CHECK_DIVIDER", incorrect), patch("spice_engine._run_simulation") as engine:
+            report = check_setup(executable=_EXECUTABLE)
+        self.assertFalse(report["ok"])
+        self.assertEqual(report["steps"][1]["code"], "divider_voltage")
+        self.assertAlmostEqual(report["steps"][1]["value_v"], 4.0)
+        self.assertEqual([step["status"] for step in report["steps"]], ["PASS", "FAIL", "NOT RUN", "NOT RUN", "NOT RUN"])
+        engine.assert_not_called()
+
+    def test_design_candidate_matches_independent_dc_and_ac_requests(self):
+        inputs = {key: value for key, value in _DEFAULTS.items() if key not in {"amp", "freq"}}
+        with tempfile.TemporaryDirectory() as location:
+            profile = _write_profile(Path(location))
+            evidence = Path(location) / "evidence"
+            search = design_search(inputs, 4, 2, profile_path=profile, executable=_EXECUTABLE, evidence_dir=evidence)
+            self.assertEqual(search["total"], 9)
+            self.assertGreaterEqual(search["evaluated"], 1)
+            self.assertEqual(search["frequency_hz"], 1000)
+            self.assertGreaterEqual(len(search["candidates"]), 1)
+            self.assertLessEqual(len(search["candidates"]), 3)
+            candidate = search["candidates"][0]
+            self.assertTrue(candidate["passed"])
+            values = dict(inputs, rc=candidate["rc_kohm"], re=candidate["re_kohm"])
+            dc = simulate("dc", values, profile_path=profile, executable=_EXECUTABLE)
+            ac = simulate("ac", values, profile_path=profile, executable=_EXECUTABLE)
+            at_target = next(row for row in ac["data"]["samples"] if row["frequency_hz"] == search["frequency_hz"])
+            self.assertAlmostEqual(candidate["ic_ma"], dc["data"]["point"]["ic_a"] * 1000)
+            self.assertAlmostEqual(candidate["gain_db"], at_target["gain_db"])
+            self.assertEqual(candidate["model_sha256"], dc["provenance"]["sha256"])
+            for key in ("dc_run_id", "ac_run_id"):
+                self.assertTrue((evidence / candidate[key] / "run.raw").is_file())
+
     def test_dc_ac_and_transient_from_real_ngspice(self):
         with tempfile.TemporaryDirectory() as location:
             directory = Path(location)

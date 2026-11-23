@@ -3,8 +3,12 @@
 from collections.abc import Mapping
 from dataclasses import replace
 from fractions import Fraction
+from ipaddress import ip_address
 from math import isclose, isfinite, ulp
 from os import getenv
+import re
+from threading import BoundedSemaphore, Lock
+from urllib.parse import urlsplit
 
 from flask import Flask, jsonify, render_template, request
 
@@ -14,7 +18,14 @@ from dc_bias import (
     calculate_by_mode, calculate_reference, emitter_resistance_for_current, validate_bias_inputs,
     validate_emitter_bias_inputs, validate_fixed_bias_inputs,
 )
-from spice_engine import FIELD_SPECS as SPICE_FIELDS, SpiceError, simulate
+from spice_engine import FIELD_SPECS as SPICE_FIELDS
+from spice_engine import SpiceError, check_setup, design_search, setup_status, simulate, verified_setup_status
+
+
+_SETUP_LOCK = Lock()
+_HOSTED_SOLVER_SLOTS = BoundedSemaphore(2)
+_HOSTED_BODY_LIMIT = 16 * 1024
+_HOSTED_RESULT_LIMIT = 4 * 1024 * 1024
 
 
 DEFAULT_FORM = {
@@ -367,13 +378,35 @@ def _tool_error(code, errors, *, status=422, **details):
     return jsonify(ok=False, code=code, errors=errors, **details), status
 
 
+def _loopback_setup_request():
+    try:
+        host = urlsplit(request.host_url).hostname
+        local_host = host == "localhost" or ip_address(host).is_loopback
+        local_client = ip_address(request.remote_addr).is_loopback
+    except ValueError:
+        return False
+    origin = request.headers.get("Origin")
+    return local_host and local_client and (origin is None or origin == request.host_url.rstrip("/"))
+
+
 def create_app() -> Flask:
     application = Flask(__name__)
+    hosted = getenv("LAB04_MODE") == "hosted"
     application.config.update(
+        LAB04_MODE="hosted" if hosted else "local",
         LAB04_SPICE_PROFILE=getenv("LAB04_SPICE_PROFILE"),
         LAB04_NGSPICE=getenv("LAB04_NGSPICE"),
         LAB04_EVIDENCE_DIR=getenv("LAB04_EVIDENCE_DIR"),
+        LAB04_DEPLOYMENT_COMMIT=getenv("VERCEL_GIT_COMMIT_SHA"),
+        LAB04_VERIFICATION_FILE=getenv("LAB04_VERIFICATION_FILE"),
+        MAX_CONTENT_LENGTH=_HOSTED_BODY_LIMIT if hosted else None,
     )
+
+    @application.errorhandler(413)
+    def large_request(error):
+        if not request.path.startswith("/api/"):
+            return error
+        return jsonify(ok=False, code="payload_too_large", message="ข้อมูลที่ส่งมามีขนาดใหญ่เกินกำหนด"), 413
 
     def render_form(mode, values, *, calculate=True, errors=None):
         point = params = None
@@ -440,7 +473,72 @@ def create_app() -> Flask:
 
     @application.get("/spice")
     def spice_workbench():
-        return render_template("spice.html", field_specs=SPICE_FIELDS)
+        return render_template(
+            "spice.html", field_specs=SPICE_FIELDS, modes=MODES,
+            bias_defaults=MODE_DEFAULTS, bias_fields=FIELD_LABELS,
+        )
+
+    def spice_error(error):
+        status = {"input": 422, "profile": 503, "engine": 503, "timeout": 504,
+                  "solver": 502, "output": 502}.get(error.code, 500)
+        return jsonify(ok=False, code=error.code, message=error.message, fields=error.fields or {}), status
+
+    def spice_config():
+        return {
+            "profile_path": application.config["LAB04_SPICE_PROFILE"],
+            "executable": application.config["LAB04_NGSPICE"],
+        }
+
+    def no_store(payload, status=200):
+        response = jsonify(payload)
+        response.cache_control.no_store = True
+        return response, status
+
+    @application.get("/api/spice/status")
+    def spice_status():
+        result = {"mode": application.config["LAB04_MODE"], **setup_status(**spice_config())}
+        commit = application.config["LAB04_DEPLOYMENT_COMMIT"]
+        if isinstance(commit, str) and re.fullmatch(r"[0-9a-fA-F]{40}", commit):
+            result["commit"] = commit.lower()
+        if result["mode"] == "hosted" and result["engine"]["status"] == "available":
+            verification = verified_setup_status(application.config["LAB04_VERIFICATION_FILE"], result["profile"],
+                                                 executable=application.config["LAB04_NGSPICE"])
+            if verification:
+                result.update(version=verification["engine_version"], verification=verification)
+        return no_store(result)
+
+    @application.post("/api/spice/check")
+    def spice_check():
+        if application.config["LAB04_MODE"] != "local" or not _loopback_setup_request():
+            return no_store({"ok": False, "code": "forbidden"}, 403)
+        if request.get_json(silent=True) != {}:
+            return no_store({"ok": False, "code": "request"}, 400)
+        if not _SETUP_LOCK.acquire(blocking=False):
+            return no_store({"ok": False, "code": "busy"}, 409)
+        try:
+            report = check_setup(**spice_config(), evidence_dir=application.config["LAB04_EVIDENCE_DIR"])
+        finally:
+            _SETUP_LOCK.release()
+        return no_store(report)
+
+    def run_spice(operation, *args):
+        hosted_request = application.config["LAB04_MODE"] == "hosted"
+        if hosted_request and not _HOSTED_SOLVER_SLOTS.acquire(blocking=False):
+            response, status = no_store({"ok": False, "code": "busy", "message": "กำลังจำลองหลายรอบ กรุณาลองใหม่"}, 429)
+            response.headers["Retry-After"] = "2"
+            return response, status
+        try:
+            result = operation(*args, **spice_config(),
+                               evidence_dir=None if hosted_request else application.config["LAB04_EVIDENCE_DIR"])
+            response, status = no_store(result)
+            if hosted_request and len(response.get_data()) > _HOSTED_RESULT_LIMIT:
+                raise SpiceError("output", "The complete simulation result exceeds the hosted response limit.")
+            return response, status
+        except SpiceError as error:
+            return spice_error(error)
+        finally:
+            if hosted_request:
+                _HOSTED_SOLVER_SLOTS.release()
 
     @application.post("/api/spice")
     def simulate_spice():
@@ -448,19 +546,16 @@ def create_app() -> Flask:
         if not isinstance(payload, dict) or set(payload) != {"analysis", "inputs"}:
             return jsonify(ok=False, code="request", message="ส่ง analysis และ inputs เป็น JSON",
                            fields={}), 400
-        try:
-            result = simulate(
-                payload["analysis"], payload["inputs"],
-                profile_path=application.config["LAB04_SPICE_PROFILE"],
-                executable=application.config["LAB04_NGSPICE"],
-                evidence_dir=application.config["LAB04_EVIDENCE_DIR"],
-            )
-        except SpiceError as error:
-            status = {"input": 422, "profile": 503, "engine": 503, "timeout": 504,
-                      "solver": 502, "output": 502}.get(error.code, 500)
-            return jsonify(ok=False, code=error.code, message=error.message,
-                           fields=error.fields or {}), status
-        return jsonify(result)
+        return run_spice(simulate, payload["analysis"], payload["inputs"])
+
+    @application.post("/api/spice/design")
+    def spice_design():
+        payload = request.get_json(silent=True)
+        expected = {"inputs", "target_gain_db", "max_ic_ma"}
+        if not isinstance(payload, dict) or set(payload) != expected:
+            return jsonify(ok=False, code="request", message="ส่งค่าตั้งและเป้าหมายการออกแบบเป็น JSON",
+                           fields={}), 400
+        return run_spice(design_search, payload["inputs"], payload["target_gain_db"], payload["max_ic_ma"])
 
     @application.post("/api/sweep")
     def sweep_json():

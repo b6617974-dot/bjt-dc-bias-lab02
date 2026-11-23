@@ -1,0 +1,10 @@
+{
+  "id": "openjellybean-2n3904",
+  "name": "OpenJellyBean 2N3904_OJ",
+  "classification": "provisional",
+  "source": "https://github.com/xdylanm/openjellybean/tree/0d0d9b659b202368dc419f8276bacb1e39694915",
+  "model_file": "2n3904-oj.lib",
+  "model_name": "2N3904_OJ",
+  "sha256": "c543201058bd7fd0a976fe1ca6d08baa2dd2bf3d2841745cd641861e2ffaf8c2",
+  "kind": "model"
+}

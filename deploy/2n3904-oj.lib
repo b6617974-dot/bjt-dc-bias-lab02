@@ -1,0 +1,30 @@
+* 2N3904_OJ from openjellybean 0.6.0 (one unchanged model declaration).
+* Source: https://github.com/xdylanm/openjellybean/tree/0d0d9b659b202368dc419f8276bacb1e39694915
+* MIT License
+*
+* Copyright (c) 2026 openjellybean contributors
+*
+* Permission is hereby granted, free of charge, to any person obtaining a copy
+* of this software and associated documentation files (the "Software"), to deal
+* in the Software without restriction, including without limitation the rights
+* to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+* copies of the Software, and to permit persons to whom the Software is
+* furnished to do so, subject to the following conditions:
+*
+* The above copyright notice and this permission notice shall be included in all
+* copies or substantial portions of the Software.
+*
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+* AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+* OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+* SOFTWARE.
+*
+.model 2N3904_OJ NPN(IS=1e-14 NF=1 BF=200 VAF=90 IKF=0.07 ISE=4e-14 NE=1.5
++ BR=4 NR=1 VAR=20 IKR=0.1 ISC=1e-13 NC=2
++ RB=10 RE=0.3 RC=1
++ CJE=6p VJE=0.7 MJE=0.33 CJC=5p VJC=0.6 MJC=0.33 FC=0.5
++ TF=0.4n XTF=2 VTF=10 ITF=0.1 TR=30n
++ EG=1.11 XTI=3 XTB=1.5)

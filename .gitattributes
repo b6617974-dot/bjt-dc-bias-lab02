@@ -1,0 +1,2 @@
+deploy/2n3904-oj.lib text eol=lf
+tests/test_web.py whitespace=cr-at-eol

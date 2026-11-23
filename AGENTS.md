@@ -8,6 +8,8 @@ The Lab 04 branch preserves the Lab 03 file contract and adds the following exer
 
 - `spice_engine.py` and `tests/test_spice_engine.py`
 - `templates/spice.html`, `static/spice.css`, and `static/spice.js`
+- `Dockerfile.vercel`, `.dockerignore`, and `.gitattributes` for the Lab 04 container build and model byte identity
+- `deploy/profile.json` and `deploy/2n3904-oj.lib` for the approved MIT-licensed demo, with the upstream notice in the model file
 
 The preceding labs use these paths:
 

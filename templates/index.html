@@ -73,6 +73,7 @@
   <span class="field-error" id="error-{{ key }}" data-error-key="{{ key }}">{{ error }}</span>
 </div>
 {%- endmacro %}
+{% if state is defined %}
 {% set regions = {'forward_active':'Forward Active', 'cutoff_estimate':'Cutoff estimate', 'saturation_estimate':'Saturation estimate', 'outside_model':'Outside model', 'invalid':'Invalid input', 'pending':'Awaiting input', 'unavailable':'Unavailable', 'mismatch':'Unconfirmed operating point'} %}
 {% set comparison_text = {'match':'Methods agree within tolerance', 'different':'Methods give different results', 'unavailable':'Comparison unavailable'} %}
 {% set engineering_text = {'pass':'Pass', 'fail':'Fail', 'na':'N/A'} %}
@@ -94,7 +95,16 @@
 <body>
 <main class="gallery">
   <article class="concept">
-    <header class="bar"><strong>Circuit Workbench A</strong><div class="top-actions"><span>ENG29 2121 · Lab 03</span><a href="{{ url_for('spice_workbench') }}">Lab 04 · CE Simulator</a><button type="button" id="language" class="button-secondary" lang="th" aria-label="เปลี่ยนเป็นภาษาไทย" hidden>ไทย</button></div></header>
+    <header class="bar">
+      <strong>Circuit Workbench A</strong>
+      <div class="top-actions">
+        <nav class="labs" aria-label="เลือกโปรแกรม" lang="th">
+          <a href="{{ url_for('index') }}" aria-current="page">คำนวณ Bias · Lab 03</a>
+          <a href="{{ url_for('spice_workbench') }}">จำลอง CE · Lab 04</a>
+        </nav>
+        <button type="button" id="language" class="button-secondary" lang="th" aria-label="เปลี่ยนเป็นภาษาไทย" hidden>ไทย</button>
+      </div>
+    </header>
     <div class="content">
       <div class="workspace-head">
         <div class="page-title">
@@ -1774,3 +1784,4 @@
 </script>
 </body>
 </html>
+{% endif %}

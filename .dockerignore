@@ -1,0 +1,21 @@
+# Allow only files used by the hosted Workbench.
+**
+!.dockerignore
+!Dockerfile.vercel
+!app.py
+!dc_bias.py
+!requirements.txt
+!spice_engine.py
+!static/
+static/**
+!static/spice.css
+!static/spice.js
+!static/style.css
+!templates/
+templates/**
+!templates/index.html
+!templates/spice.html
+!deploy/
+deploy/**
+!deploy/profile.json
+!deploy/2n3904-oj.lib

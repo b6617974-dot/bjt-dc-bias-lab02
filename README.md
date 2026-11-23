@@ -1,41 +1,46 @@
-# ENG29 2121 Lab 04 · BJT CE Amplifier Simulator
+# ENG29 2121 Lab 03–04 · BJT Workbench
 
-Lab 04 ใช้ Flask เรียก **ngspice** เพื่อวิเคราะห์วงจร NPN Common-Emitter Voltage Divider แบบไม่มี emitter bypass capacitor หน้า [Lab 04](http://127.0.0.1:8780/spice) แสดงผล DC, Bode และ Transient จากแต่ละรอบรัน พร้อมโมเดล หน่วย และรหัสรัน หน้า [Lab 03](http://127.0.0.1:8780/) เป็นเครื่องคำนวณ Analytical DC Bias ทั้งสามแบบพร้อมสมการคำนวณมือ
+ใช้ **DC Bias** สำหรับ Fixed, Emitter และ Voltage Divider พร้อมสมการคำนวณมือ ใช้ **AC** และ **Transient** เมื่อต่อวงจร NPN Common-Emitter แบบแบ่งแรงดันและไม่มี emitter bypass capacitor การจำลองใช้ Flask เรียก ngspice และแสดงชื่อโมเดล หน่วย และรหัสรันกำกับข้อมูลทุกชุด
+
+- **เปิดจากเบราว์เซอร์** ใช้ [BJT Workbench บน Vercel](https://bjt-workbench-lab04.vercel.app/spice) เซิร์ฟเวอร์จัดการ Flask และ ngspice ให้ รุ่นออนไลน์ใช้โมเดลสาธิต OpenJellyBean 2N3904_OJ
+- **เปิดบนเครื่องเพื่อใช้ Starter Kit ของผู้สอน** ทำตามขั้นตอนด้านล่างแล้วเปิด [BJT Workbench ในเครื่อง](http://127.0.0.1:8780/spice) รุ่นนี้ให้สร้างและตรวจโปรไฟล์ของชุดที่ได้รับมา
 
 ## เตรียม ngspice และโมเดล
 
-1. ติดตั้ง ngspice จาก [ผู้พัฒนา ngspice](https://ngspice.sourceforge.io/download.html) ทดสอบ `ngspice --version` ใน Terminal หาก Windows มีทั้ง `ngspice.exe` และ `ngspice_con.exe` ให้ใช้ตัว Console `ngspice_con.exe` กับ Flask
-2. วางไฟล์โมเดลที่ได้รับจากผู้สอนในโฟลเดอร์ภายนอก Git หากยังไม่มี ให้ดาวน์โหลด [2N3904 จาก onsemi](https://www.onsemi.com/pub/Collateral/2N3904.SP3) เพื่อทดลองด้วยโมเดลชั่วคราว บันทึก SHA-256 จากไฟล์ที่ดาวน์โหลด รอบอ้างอิงใช้ `ba63b85c254f6fc90e1ccd89ae70b9cc9ee1ada7ba4875f3bb22f1431999d503`
-3. สร้าง `profile.json` ไว้ข้างไฟล์โมเดลตามตัวอย่างนี้ แล้วกำหนดตำแหน่งจาก Terminal เดียวกับที่เปิด Flask
-
-```json
-{
-  "id": "onsemi-2n3904",
-  "name": "onsemi 2N3904",
-  "classification": "provisional",
-  "source": "https://www.onsemi.com/pub/Collateral/2N3904.SP3",
-  "model_file": "2N3904.SP3",
-  "model_name": "2n3904",
-  "sha256": "ba63b85c254f6fc90e1ccd89ae70b9cc9ee1ada7ba4875f3bb22f1431999d503",
-  "kind": "model"
-}
-```
+1. ติดตั้ง ngspice แล้วทดสอบ `ngspice -v` ใน Terminal หาก Windows มีทั้ง `ngspice.exe` และ `ngspice_con.exe` ให้ใช้ตัว Console กับ Flask [ดาวน์โหลด ngspice](https://ngspice.sourceforge.io/download.html)
+2. เริ่มด้วย `deploy/profile.json` ซึ่งเลือกโมเดลสาธิตที่มาพร้อมโครงการ แล้วเปิด Flask ตามคำสั่งด้านล่าง
+3. เปิด **ตั้งค่า ngspice → ตรวจและเตรียม Starter Kit** แล้วกดตรวจ ผลที่พร้อมต้องอ่านแรงดัน 5 V จากวงจรแบ่งแรงดันทดสอบ และผ่านการจำลอง DC, AC, Transient
 
 ```powershell
-$env:LAB04_SPICE_PROFILE = 'C:/path/to/profile.json'
+$env:LAB04_SPICE_PROFILE = (Resolve-Path 'deploy/profile.json').Path
 $env:LAB04_NGSPICE = 'C:/path/to/Spice64/bin/ngspice_con.exe'
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe -m flask --app app run --host 127.0.0.1 --port 8780
 ```
 
-ถ้า Terminal เรียก `ngspice` จาก `PATH` ได้อยู่แล้ว ให้ตั้งเฉพาะ `LAB04_SPICE_PROFILE` บน macOS/Linux ใช้ `export LAB04_SPICE_PROFILE=/path/to/profile.json` และเรียก `.venv/bin/python` แทน Python ในตัวอย่าง Windows เปิด [หน้า CE Simulator](http://127.0.0.1:8780/spice) แล้วเลือก DC, AC หรือ Transient และกด Run
+ถ้า Terminal เรียก `ngspice` จาก `PATH` ได้ ให้ข้ามบรรทัดที่ตั้ง `LAB04_NGSPICE` บน macOS/Linux ใช้ `export LAB04_SPICE_PROFILE="$PWD/deploy/profile.json"` และใช้ `.venv/bin/python` ในคำสั่งติดตั้งและรัน
 
-- สลับไปใช้ชุดผู้สอนด้วยค่าตั้งใหม่ที่ระบุแหล่งที่มาและ `classification: instructor` แล้วเปิด Flask ใหม่ สำหรับ subcircuit สามขาใช้ `kind: subckt` พร้อม `pins` เรียงตาม declaration ของชุดนั้น เช่น `["E","C","B"]` เฉพาะเมื่อเอกสารของชุดนั้นระบุลำดับ E, C, B จริง หากได้รับ Netlist หรือ adapter ทั้งชุด ให้ทวนวงจรและจับคู่ชื่อเวกเตอร์ก่อนเชื่อมเข้าตัวอ่านผล
+- เมื่อได้ **โมเดลที่ผู้สอนยืนยัน** ให้เปิดแผงตั้งค่า เลือกไฟล์โมเดล ตั้งประเภทชุดผู้สอน กรอกแหล่งที่มา และเลือกชื่อ declaration เว็บอ่านไฟล์ในเบราว์เซอร์เพื่อสร้าง `profile.json` และ SHA-256 จัดเก็บโปรไฟล์ข้างไฟล์โมเดล ตั้ง `LAB04_SPICE_PROFILE` ไปยังโปรไฟล์นั้น เปิด Flask ใหม่ และกดตรวจอีกครั้ง
+- สำหรับ `.SUBCKT` สามขา ให้กรอก B/C/E ตามลำดับจริงจากเอกสารของโมเดล สำหรับ `.cir` หรือ Starter Adapter ที่มีวงจรทั้งชุด ให้ทวน topology, หน่วย, โหนดและเวกเตอร์ก่อนเชื่อม ทดสอบทั้งสาม analysis ด้วยชุดนั้นก่อนใช้อ้างอิงส่งตรวจ
 - ตั้ง `LAB04_EVIDENCE_DIR` เป็นไดเรกทอรีภายนอก Git เฉพาะช่วงเก็บหลักฐาน เพื่อเก็บ Netlist, raw และ log แยกตามรหัสรัน การคำนวณตามปกติใช้ไดเรกทอรีชั่วคราว
 - AC ใช้ small-signal excitation ของตัวเอง ส่วนความถี่และแอมพลิจูดของ SIN ใช้กับ Transient ช่วงความถี่สัญญาณสำหรับ Transient คือ 1 Hz–10 kHz เพื่อจำกัดขนาดข้อมูลตามช่วงเวลาและ time step
-- ถ้าหน้าเว็บแจ้งว่าเรียก ngspice ไม่ได้ ให้ทดสอบ executable ด้วย `-v` ใน Terminal เดียวกับ Flask และตรวจตำแหน่ง `LAB04_NGSPICE` ถ้าโมเดลไม่พร้อม ให้ตรวจ `LAB04_SPICE_PROFILE`, เส้นทาง `model_file`, ชื่อ declaration และ SHA-256 แล้วเปิด Flask ใหม่ หน้า Lab 03 ยังเปิดได้ระหว่างนี้
+- ถ้าติดตั้ง ngspice ไม่สำเร็จ ให้ใช้ [รุ่นออนไลน์](https://bjt-workbench-lab04.vercel.app/spice) สำหรับการสาธิต หรือใช้โหมดคำนวณมือ DC Bias ขณะตรวจตำแหน่ง executable หากชื่อโมเดลหรือ SHA-256 ไม่ตรง ให้ทวนไฟล์กับต้นทางก่อนสร้างโปรไฟล์ใหม่
 - ตรวจซ้ำจากโฟลเดอร์โครงการด้วย `.\.venv\Scripts\python.exe -m unittest discover -s tests -v` บน Windows หรือ `.venv/bin/python -m unittest discover -s tests -v` บน macOS/Linux ตั้งค่า ngspice และโมเดลไว้ก่อนเพื่อให้การทดสอบที่เรียก solver จริงทำงานครบ เทียบค่ากับ [บันทึกการตรวจ](docs/validation.md)
+
+### โมเดลสาธิตและการเผยแพร่
+
+ชุดสาธิตใช้ OpenJellyBean 0.6.0 โมเดล `2N3904_OJ` ภายใต้สัญญาอนุญาต MIT ไฟล์พร้อมประกาศลิขสิทธิ์อยู่ใน `deploy/2n3904-oj.lib` โดยมี SHA-256 `c543201058bd7fd0a976fe1ca6d08baa2dd2bf3d2841745cd641861e2ffaf8c2` ผลการตรวจด้วยชุดผู้สอนจะมีเมื่อได้รับชุดจริง [ต้นทาง OpenJellyBean](https://github.com/xdylanm/openjellybean/tree/0d0d9b659b202368dc419f8276bacb1e39694915)
+
+`Dockerfile.vercel` สร้าง ngspice 47 และรันการตรวจ 5 V, DC, AC, Transient ระหว่างสร้างรุ่น ใช้ Container Runtime และตั้ง `PORT=8080` ผลตรวจในแผงของรุ่นออนไลน์ผูกกับโมเดลที่ตรวจตอนสร้างรุ่น ส่วนเบราว์เซอร์เรียก API เพื่อจำลองแต่ละรอบ [คู่มือ Container Runtime](https://vercel.com/docs/functions/runtimes/container)
+
+## ใช้ BJT Workbench เหมือนเป็นการทดลองเดียว
+
+1. เปิด `/spice` ในแท็บ **DC Bias** เลือก Fixed, Emitter หรือ Voltage Divider แล้วดูกราฟจุดทำงานและสมการแทนค่า สมมติฐาน β และ VBE อยู่ในแผงคำนวณมือ ผลของ Voltage Divider จาก ngspice แสดงพร้อมชื่อโมเดลและ V<sub>CE</sub>, I<sub>C</sub> สำหรับเทียบกับผลคำนวณมือ
+2. ที่ Voltage Divider กด **เทียบกับค่าฐาน** แล้วแก้ค่า เช่น RE 1 → 2 kΩ ใช้ **AC** และ **Transient** ต่อจากฟอร์มเดิม ระบบรันค่าฐานของแท็บนั้นตามต้องการ ตรวจรุ่นโมเดล และวาดเส้นทับบนช่วงแกนของรอบปัจจุบัน
+3. เปิด **วัดจากกราฟ** เพื่อปัก A แล้วเลื่อน B อ่านส่วนต่าง ซูมช่วง A–B หรือกดวัดอัตโนมัติ AC ใช้ Gain ใกล้ 1 kHz เป็นระดับอ้างอิง −3 dB และแจ้งเมื่อช่วง sweep ไม่พบจุดตัด Transient วัดคาบ Vin จากจุดข้ามศูนย์ขาขึ้นสองจุดท้ายที่ข้อมูลคร่อม
+4. เปิด **ออกแบบให้เข้าเป้า** ใส่ Gain ขั้นต่ำที่ 1 kHz และเพดาน IC โปรแกรมลองได้ถึงเก้าคู่ใกล้ค่า RC/RE ปัจจุบัน โดยใช้ผล DC และ AC ของ ngspice และแสดงได้ถึงสามทางเลือกพร้อมรหัสรัน ผลครอบคลุมชุดค่าที่ระบบลองจริง
+5. เปิด **เก็บผลและเปิดกลับมาทดลอง** เพื่อบันทึกชื่อ โน้ต อินพุต แท็บ และจุดอ่านในเบราว์เซอร์เดียวกัน การเปิดรอบที่เก็บจะคำนวณใหม่และได้รหัสรันใหม่ เลือกดาวน์โหลด CSV, หลักฐาน JSON, กราฟ SVG หรือพิมพ์ PDF ได้ตามผลที่มี
 
 ## Lab 03 · โปรแกรมไบอัสทรานซิสเตอร์ BJT
 
