@@ -46,13 +46,30 @@ button:disabled { opacity: .58; cursor: default; }
 .setup-badge[data-state="ready"] { color: #185849; background: var(--wash); }
 .setup-badge[data-state="warning"] { color: var(--warm); background: var(--warm-wash); }
 .setup-body { display: grid; grid-template-columns: minmax(200px, .8fr) minmax(0, 1.5fr); gap: 16px; padding: 12px; border-top: 1px solid var(--line); }
-.setup-body:has(#setup-local[hidden]) { grid-template-columns: minmax(0, 1fr); }
 .setup-body :is(h2, .group, p, .facts) { margin-bottom: 6px; }
-.setup-local { display: grid; min-width: 0; gap: 9px; padding-inline-start: 12px; border-inline-start: 1px solid var(--line); }
-.setup-local p { font-size: .85rem; }
+.setup-tools { min-width: 0; padding-inline-start: 12px; border-inline-start: 1px solid var(--line); }
+.setup-local { display: grid; min-width: 0; gap: 9px; padding: 0 9px 8px; }
+.setup-local p, .starter-intake p { font-size: .85rem; }
 .setup-local form > label { display: block; margin-bottom: 4px; font-size: .85rem; }
 .setup-local input[type="file"] { width: 100%; }
 .setup-local input[type="file"]::file-selector-button { margin-inline-end: 7px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--accent); background: var(--card); cursor: pointer; }
+.starter-intake { margin-bottom: 8px; overflow-wrap: anywhere; }
+.starter-active { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin-bottom: 8px; color: var(--accent); }
+.starter-active p { margin-bottom: 0; font-weight: 700; }
+#starter-drop { margin-bottom: 8px; padding: 8px; border: 1px dashed var(--line); border-radius: 7px; background: #f3f7f4; }
+#starter-drop[data-drag] { border-color: var(--accent); background: var(--wash); }
+.starter-pickers { display: flex; flex-wrap: wrap; gap: 6px; }
+.starter-picker { position: relative; display: grid; place-items: center; min-height: 38px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 7px; color: var(--accent); background: var(--card); font-size: .85rem; font-weight: 700; }
+.starter-picker:hover { border-color: var(--accent); }
+.starter-picker:has(:focus-visible) { outline: 3px solid #3c77b3; outline-offset: 3px; }
+.starter-picker input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.starter-source .detail-body { display: grid; gap: 5px; justify-items: start; }
+.starter-source :is(textarea, input) { width: 100%; color: inherit; padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); font: .85rem var(--mono); }
+.starter-source textarea { resize: vertical; }
+.starter-files-list { max-height: 11rem; overflow: auto; padding-inline-start: 1.3rem; margin-block: 0; font-size: .8rem; color: var(--muted); }
+.starter-files-list li + li { margin-top: 4px; }
+#starter-pin-field { min-inline-size: 0; margin-block: 7px; }
+.starter-intake p:empty { display: none; }
 #setup-hash-input { display: block; width: min(100%, 66ch); padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px; font: .85rem var(--mono); }
 .setup-local :is(code, .muted) { overflow-wrap: anywhere; }
 .setup-local pre { padding: 7px 9px; margin-block: 4px 7px; background: #f3f7f4; border-radius: 6px; white-space: pre-wrap; }
@@ -197,7 +214,7 @@ summary { cursor: pointer; padding: 7px 9px; font-size: .86rem; font-weight: 700
 @media (max-width: 800px) {
   .shell { padding-inline: 12px; }
   .setup-body { grid-template-columns: minmax(0, 1fr); gap: 9px; }
-  .setup-local { padding: 9px 0 0; border: 0; border-top: 1px solid var(--line); }
+  .setup-tools { padding: 9px 0 0; border: 0; border-top: 1px solid var(--line); }
   .workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; grid-template-areas: "view" "inputs" "circuit" "tools"; gap: 9px; }
   .workbench-sidebar { display: contents; }
   .panel.inputs { grid-area: inputs; }
@@ -211,6 +228,7 @@ summary { cursor: pointer; padding: 7px 9px; font-size: .86rem; font-weight: 700
 }
 @media (max-width: 540px) {
   html { scroll-padding-block-start: 126px; }
+  .setup-panel :is(summary, button, label, input, select, textarea) { scroll-margin-block-start: 8px; }
   .mast .brand { display: none; }
   .labs a { padding-inline: 6px; font-size: 12px; }
   .intro { padding-block: 13px 10px; }

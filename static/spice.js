@@ -40,6 +40,7 @@ let latest = null, chartViews = [], activeIndex = 0;
 let playback = 0, playbackStart = null, playbackOrigin = 0;
 let analytical = null, baseline = null, reference = null, pinIndex = null, chartWindow = null;
 let restorePoint = null, designRequest = null;
+let activeStarter = null;
 let experiments = loadExperiments();
 
 function format(value) {
@@ -693,7 +694,7 @@ async function compareBaseline(sequence = generation, signal) {
   if (!prior) {
     baselineNote("กำลังรันค่าฐานสำหรับแท็บนี้");
     try {
-      const candidate = await fetchJson("/api/spice", {analysis: view, inputs: spiceInputs(view, savedBase.inputs)}, signal);
+      const candidate = await fetchSpice("/api/spice", {analysis: view, inputs: spiceInputs(view, savedBase.inputs)}, signal);
       if (sequence !== generation || baseline !== savedBase || latest?.payload !== current) return;
       if (isResult(candidate, view)) {
         prior = candidate;
@@ -810,7 +811,7 @@ async function run() {
   try {
     const [manual, simulated] = await Promise.allSettled([
       analysis === "dc" ? fetchJson("/api/calculate", biasInputs(biasMode, values), request.signal) : null,
-      biasMode === "divider" ? fetchJson("/api/spice", {analysis, inputs: spiceInputs(analysis, values)}, request.signal) : null,
+      biasMode === "divider" ? fetchSpice("/api/spice", {analysis, inputs: spiceInputs(analysis, values)}, request.signal) : null,
     ]);
     if (sequence !== generation) return;
     const payload = simulated.value;
@@ -847,6 +848,10 @@ async function fetchJson(url, data, signal) {
   const response = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify(data), signal});
   return response.json();
+}
+
+function fetchSpice(url, data, signal) {
+  return fetchJson(url, activeStarter ? {...data, model: activeStarter.model} : data, signal);
 }
 
 function beginAuto() {
@@ -974,7 +979,7 @@ async function searchDesign() {
   status.textContent = "กำลังลองค่าชิ้นส่วนด้วย ngspice";
   get("design-run").disabled = true;
   try {
-    const data = await fetchJson("/api/spice/design", {inputs, target_gain_db: targetGain, max_ic_ma: maxCurrent}, request.signal);
+    const data = await fetchSpice("/api/spice/design", {inputs, target_gain_db: targetGain, max_ic_ma: maxCurrent}, request.signal);
     if (designRequest !== request) return;
     if (!data.ok) { status.textContent = data.message ?? "ค้นหาชุดค่าไม่สำเร็จ"; return; }
     const passed = data.candidates.some(candidate => candidate.passed);
@@ -1036,7 +1041,8 @@ function download() {
   const prefix = [
     ["run_id", run_id], ["analysis", analysis], ["name", provenance.name],
     ["model_name", provenance.model_name], ["classification", provenance.classification],
-    ["model_sha256", provenance.sha256], ["ngspice_version", provenance.ngspice_version],
+    ["model_kind", provenance.kind], ["model_pins", provenance.pins?.join(" → ")],
+    ["model_sha256", provenance.sha256], ["model_input_sha256", provenance.input_sha256], ["ngspice_version", provenance.ngspice_version],
     ["netlist_sha256", provenance.netlist_sha256], ["source", provenance.source],
     ...Object.entries(payload.inputs_si || {}).map(([key, value]) => ["input_" + key + "_" + inputUnits[key], value]),
   ];
@@ -1284,10 +1290,13 @@ function renderSetup() {
   }
   facts(get("setup-facts"), details);
 
-  const list = get("setup-steps");
+  renderSetupSteps(get("setup-steps"), steps);
+}
+
+function renderSetupSteps(list, steps) {
   list.replaceChildren();
   for (const [id, label] of Object.entries(setupLabels)) {
-    const step = steps.find(item => item.id === id);
+    const step = steps.find(item => item?.id === id);
     if (!step || !["PASS", "FAIL", "NOT RUN"].includes(step.status)) continue;
     const row = element("li");
     const pill = element("strong", step.status, "setup-badge");
@@ -1470,6 +1479,624 @@ async function readSetupModel(file) {
     if (ticket === setupFileRevision) message.textContent = "เปิดไฟล์โมเดลไม่ได้ ลองเลือกไฟล์อีกครั้ง";
   }
 }
+
+// Read and inspect selected files in the browser. Only the selected model reaches Flask.
+const starterLimits = {
+    files: 96,
+    selectedBytes: 12 * 1024 * 1024,
+    expandedBytes: 16 * 1024 * 1024,
+    textBytes: 256 * 1024,
+    modelChars: 8500,
+};
+
+function starterPath(path) {
+    if (typeof path !== 'string' || path.length > 512 || /[\\:\u0000-\u001f\u007f]/.test(path)) {
+        throw new Error('พบชื่อไฟล์ที่อ่านไม่ได้หรือมีเส้นทางที่ไม่รองรับ');
+    }
+    const parts = path.normalize('NFC').split('/');
+    if (parts.some(part => !part.trim() || part === '.' || part === '..')) {
+        throw new Error('พบเส้นทางไฟล์ที่ออกนอกชุดที่เลือก');
+    }
+    return parts.join('/');
+}
+
+function starterFileKind(path) {
+    if (/\.zip$/i.test(path)) return 'archive';
+    if (/\.(?:pdf|docx?|odt|rtf|pptx?|xlsx?|md|html?|png|jpe?g|webp|svg|gif|bmp|ico)$/i.test(path)) return 'document';
+    if (/\.(?:raw|log|csv|tsv|dat|out)$/i.test(path)) return 'output';
+    if (/\.(?:exe|msi|dll|so|dylib|bin|7z|rar|tar|gz|bz2|xz)$/i.test(path)) return 'binary';
+    return 'text';
+}
+
+function starterDecode(data) {
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(data);
+    if (/[\u0000-\u0008\u000b\u000e-\u001f\u007f]/.test(text)) throw new Error('Not text');
+    return text;
+}
+
+function starterChecksum(bytes) {
+    let crc = 0xffffffff;
+    for (const byte of bytes) {
+        crc ^= byte;
+        for (let bit = 0; bit < 8; bit += 1) {
+            crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+        }
+    }
+    return (~crc) >>> 0;
+}
+
+function starterZipEntries(bytes) {
+    const badZip = () => new Error('อ่าน ZIP ไม่ได้ ไฟล์อาจไม่สมบูรณ์หรือใช้รูปแบบที่ไม่รองรับ');
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const u16 = at => view.getUint16(at, true);
+    const u32 = at => view.getUint32(at, true);
+    let end = bytes.length - 22;
+    const minEnd = Math.max(0, end - 65535);
+    while (end >= minEnd && (u32(end) !== 0x06054b50 || end + 22 + u16(end + 20) !== bytes.length)) end -= 1;
+    if (end < minEnd) throw badZip();
+    const count = u16(end + 10);
+    const central = u32(end + 16);
+    if (u16(end + 4) || u16(end + 6) || u16(end + 8) !== count || central + u32(end + 12) !== end) throw badZip();
+    if (count > starterLimits.files) throw new Error('ZIP มีรายการเกิน 96 รายการ');
+
+    const members = [];
+    const paths = new Set();
+    let at = central;
+    for (let index = 0; index < count; index += 1) {
+        if (at + 46 > end || u32(at) !== 0x02014b50) throw badZip();
+        const flags = u16(at + 8);
+        const method = u16(at + 10);
+        const crc = u32(at + 16);
+        const packed = u32(at + 20);
+        const size = u32(at + 24);
+        const nameSize = u16(at + 28);
+        const nameAt = at + 46;
+        const nameEnd = nameAt + nameSize;
+        const local = u32(at + 42);
+        const mode = (u32(at + 38) >>> 16) & 0xf000;
+        const next = nameEnd + u16(at + 30) + u16(at + 32);
+        if (next > end || u16(at + 34) || (flags & ~(method === 8 ? 0x080e : 0x0808)) || ![0, 8].includes(method)) throw badZip();
+        const name = starterDecode(bytes.subarray(nameAt, nameEnd));
+        const directory = name.endsWith('/');
+        const path = starterPath(directory ? name.slice(0, -1) : name);
+        const pathKey = path.toLowerCase();
+        if (paths.has(pathKey)) throw badZip();
+        paths.add(pathKey);
+        if ((mode && mode !== (directory ? 0x4000 : 0x8000)) || (directory && size)) throw badZip();
+        if (local + 30 > central || u32(local) !== 0x04034b50 || u16(local + 6) !== flags || u16(local + 8) !== method || u16(local + 26) !== nameSize) throw badZip();
+        const localName = local + 30;
+        const dataAt = localName + nameSize + u16(local + 28);
+        let dataEnd = dataAt + packed;
+        if (dataEnd > central || (method === 0 && packed !== size)) throw badZip();
+        if (!bytes.subarray(nameAt, nameEnd).every((byte, i) => byte === bytes[localName + i])) throw badZip();
+        const matchesValues = offset => u32(offset) === crc && u32(offset + 4) === packed && u32(offset + 8) === size;
+        if (flags & 8) {
+            if (dataEnd + 16 <= central && u32(dataEnd) === 0x08074b50 && matchesValues(dataEnd + 4)) dataEnd += 16;
+            else if (dataEnd + 12 <= central && matchesValues(dataEnd)) dataEnd += 12;
+            else throw badZip();
+        } else if (!matchesValues(local + 14)) {
+            throw badZip();
+        }
+        members.push({ path, directory, method, crc, packed, size, local, dataAt, dataEnd });
+        at = next;
+    }
+    if (at !== end) throw badZip();
+    let previousEnd = 0;
+    for (const entry of [...members].sort((a, b) => a.local - b.local)) {
+        if (entry.local < previousEnd) throw badZip();
+        previousEnd = entry.dataEnd;
+    }
+    return members;
+}
+
+async function starterUnpack(data, member) {
+    if (member.method === 0) return data;
+    let decompressor;
+    try {
+        decompressor = new DecompressionStream('deflate-raw');
+    } catch {
+        throw new Error('เบราว์เซอร์นี้อ่าน ZIP แบบบีบอัดไม่ได้ กรุณาแตก ZIP แล้วเลือกไฟล์หรือโฟลเดอร์');
+    }
+    const reader = new Blob([data]).stream().pipeThrough(decompressor).getReader();
+    const result = new Uint8Array(member.size);
+    let offset = 0;
+    try {
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            if (offset + value.length > result.length) {
+                await reader.cancel();
+                throw new Error('Unexpected expanded size');
+            }
+            result.set(value, offset);
+            offset += value.length;
+        }
+        if (offset !== result.length) throw new Error('Unexpected expanded size');
+    } catch {
+        throw new Error('แตกข้อมูลใน ZIP ไม่สำเร็จ');
+    } finally {
+        reader.releaseLock();
+    }
+    return result;
+}
+
+async function readStarterEntries(files) {
+    const selected = Array.from(files);
+    if (selected.length > starterLimits.files || selected.reduce((sum, file) => sum + file.size, 0) > starterLimits.selectedBytes) {
+        throw new Error('เลือกได้ไม่เกิน 96 ไฟล์ ขนาดรวมไม่เกิน 12 MiB');
+    }
+    const entries = [];
+    const paths = new Set();
+    const selectedPaths = new Set();
+    let expandedBytes = 0;
+    async function add(path, size, read) {
+        expandedBytes += size;
+        if (entries.length >= starterLimits.files || expandedBytes > starterLimits.expandedBytes) throw new Error('ชุดที่คลายแล้วเกิน 96 ไฟล์หรือ 16 MiB');
+        const key = path.toLowerCase();
+        if (paths.has(key)) throw new Error(`ชื่อไฟล์ซ้ำในชุดที่เลือก · ${path}`);
+        paths.add(key);
+        let kind = starterFileKind(path);
+        let text = null;
+        if (kind === 'text' && size <= starterLimits.textBytes) {
+            const data = await read();
+            try {
+                text = starterDecode(data);
+            } catch {
+                kind = 'binary';
+            }
+        } else if (kind === 'text') {
+            kind = 'binary';
+        }
+        entries.push({ path, text, size, kind });
+    }
+
+    for (const file of selected) {
+        const path = starterPath(file.webkitRelativePath || file.name);
+        const pathKey = path.toLowerCase();
+        if (selectedPaths.has(pathKey)) throw new Error(`ชื่อไฟล์ซ้ำในชุดที่เลือก · ${path}`);
+        selectedPaths.add(pathKey);
+        const read = async () => {
+            const bytes = new Uint8Array(await file.arrayBuffer());
+            if (bytes.length !== file.size) throw new Error(`ขนาดไฟล์ไม่ตรง · ${path}`);
+            return bytes;
+        };
+        if (starterFileKind(path) !== 'archive') {
+            await add(path, file.size, read);
+            continue;
+        }
+        const bytes = await read();
+        const members = starterZipEntries(bytes).filter(member => !member.directory);
+        if (entries.length + members.length > starterLimits.files || expandedBytes + members.reduce((sum, member) => sum + member.size, 0) > starterLimits.expandedBytes) {
+            throw new Error('ชุดที่คลายแล้วเกิน 96 ไฟล์หรือ 16 MiB');
+        }
+        for (const member of members) {
+            await add(starterPath(`${path}/${member.path}`), member.size, async () => {
+                const data = await starterUnpack(bytes.subarray(member.dataAt, member.dataAt + member.packed), member);
+                if (starterChecksum(data) !== member.crc) throw new Error(`ข้อมูลใน ZIP ไม่ตรงกับรายการไฟล์ · ${member.path}`);
+                return data;
+            });
+        }
+        if (!members.length) await add(path, 0, read);
+    }
+    return entries;
+}
+
+function starterReferences(entry) {
+    const references = [];
+    for (const line of (entry.text || '').split(/\r\n?|\n/)) {
+        const directive = /^\s*\.(include|inc|lib)\s+(?:"([^"]+)"|'([^']+)'|(\S+))(.*)$/i.exec(line);
+        if (!directive) continue;
+        const [, command, doubleQuoted, singleQuoted, bare, remainder] = directive;
+        if (command.toLowerCase() === 'lib' && !/^\s+[^$;\s]/.test(remainder)) continue;
+        references.push({ reference: doubleQuoted || singleQuoted || bare, library: command.toLowerCase() === 'lib' });
+    }
+    return references;
+}
+
+function starterLookup(entries, entry, reference) {
+    const relative = reference.replace(/\\/g, '/');
+    if (relative.startsWith('/') || /[:\u0000-\u001f\u007f]/.test(relative)) return { status: 'outside' };
+    const parts = entry.path.split('/').slice(0, -1);
+    const rootDepth = parts.reduce((depth, part, index) => /\.zip$/i.test(part) ? index + 1 : depth, 0);
+    for (const part of relative.normalize('NFC').split('/')) {
+        if (part === '.') continue;
+        if (!part.trim()) return { status: 'outside' };
+        if (part === '..') {
+            if (parts.length <= rootDepth) return { status: 'outside' };
+            parts.pop();
+        } else {
+            parts.push(part);
+        }
+    }
+    const path = parts.join('/').toLowerCase();
+    const exact = entries.filter(candidate => candidate.path.toLowerCase() === path);
+    if (exact.length === 1) return { entry: exact[0] };
+    return { status: exact.length ? 'ambiguous' : 'missing' };
+}
+
+function starterIncludeIssues(entries, entry) {
+    return starterReferences(entry).flatMap(({ reference }) => {
+        const match = starterLookup(entries, entry, reference);
+        return match.entry?.kind === 'text' ? [] : [{ reference, status: match.status || 'missing', path: entry.path }];
+    });
+}
+
+function starterDeclarations(entry) {
+    const models = [];
+    const subcircuits = [];
+    const lines = (entry.text || '').split(/\r\n?|\n/).map(line => line.trim().replace(/\s+(?:\$|\/\/).*$/, ''))
+        .filter(line => line && !line.startsWith('*') && !line.startsWith('$') && !line.startsWith('//'));
+    let subcircuit = null;
+    let librarySection = false;
+    for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index].trim();
+        const lib = /^\.lib\s+\S+\s*(?:[$;].*)?$/i.test(line);
+        if (!subcircuit && lib) librarySection = true;
+        if (!subcircuit && /^\.endl(?:\s|$)/i.test(line)) librarySection = false;
+        const model = /^\.model\s+([^\s(]+)\s+npn(?=\s|\(|$)/i.exec(line);
+        if (model) {
+            const start = index;
+            while (/^\s*\+/.test(lines[index + 1] || '')) index += 1;
+            const item = { name: model[1], text: lines.slice(start, index + 1).join('\n').trim(), librarySection };
+            (subcircuit ? subcircuit.localModels : models).push(item);
+        }
+        const begin = /^\.subckt\s+(\S+)(.*)$/i.exec(line);
+        if (begin) {
+            if (subcircuit) subcircuit.nested = true;
+            else subcircuit = { name: begin[1], nodes: begin[2].trim().split(/\s+/).filter(Boolean), start: index, localModels: [], librarySection };
+        }
+        if (subcircuit && /^\.ends(?:\s|$)/i.test(line)) {
+            subcircuits.push({ ...subcircuit, text: lines.slice(subcircuit.start, index + 1).join('\n').trim() });
+            subcircuit = null;
+        }
+    }
+    if (subcircuit) subcircuits.push({ ...subcircuit, unclosed: true });
+    return { models, subcircuits };
+}
+
+function starterModels(entries) {
+    const declarations = new Map(entries.filter(entry => entry.kind === 'text').map(entry => [entry, starterDeclarations(entry)]));
+    const references = new Map([...declarations.keys()].map(entry => [entry, starterReferences(entry)]));
+    const candidates = [];
+    function add(entry, { name, nodes = [], text }, kind, dependencies = [], missing = [], error = null) {
+        if (candidates.length >= 128) throw new Error('พบโมเดลเกิน 128 รายการ กรุณาเลือกเฉพาะชุดวงจรที่จะใช้');
+        if (!error && !/^[a-z0-9][a-z0-9_.-]{0,63}$/i.test(name)) error = 'ชื่อโมเดลใช้ได้เฉพาะอักขระ ASCII ตามรูปแบบ SPICE และไม่เกิน 64 ตัวอักษร';
+        if (!error && (!text || text.length > starterLimits.modelChars || /[^\x09\x0a\x20-\x7e]/.test(text))) {
+            error = 'โมเดลที่เลือกต้องเป็นข้อความ ASCII ขนาดไม่เกิน 8,500 ตัวอักษร';
+        }
+        candidates.push({ id: String(candidates.length), path: entry.path, name, kind, nodes, dependencies, missing, error, text: error ? null : text });
+    }
+
+    for (const [entry, { models, subcircuits }] of declarations) {
+        for (const model of models) add(entry, model, 'model');
+        for (const circuit of subcircuits) {
+            if (circuit.unclosed || circuit.nested || circuit.nodes.length !== 3 || new Set(circuit.nodes.map(node => node.toLowerCase())).size !== 3) {
+                add(entry, circuit, 'subckt', [], [], 'ต้องเป็น subcircuit สามขาที่ปิดด้วย .ENDS และไม่มี subcircuit ซ้อน');
+                continue;
+            }
+            const transistor = circuit.text.split('\n').map(line => /^\s*Q\S+\s+\S+\s+\S+\s+\S+\s+(\S+)\s*(?:[$;].*)?$/i.exec(line)).filter(Boolean);
+            if (transistor.length !== 1 || starterReferences(circuit).length) {
+                add(entry, circuit, 'subckt', [], [], 'ต้องมี Q แบบ NPN หนึ่งตัวและไม่มีคำสั่งอ้างไฟล์ในตัว subcircuit');
+                continue;
+            }
+            const requiredName = transistor[0][1].toLowerCase();
+            const files = [entry];
+            const missing = [];
+            for (const file of files) {
+                for (const { reference, library } of references.get(file)) {
+                    const match = starterLookup(entries, file, reference);
+                    if (library || !declarations.has(match.entry)) missing.push(reference);
+                    else if (!files.includes(match.entry)) files.push(match.entry);
+                }
+            }
+            const local = circuit.localModels.filter(model => model.name.toLowerCase() === requiredName);
+            const external = files.flatMap(file => declarations.get(file).models.filter(model => !model.librarySection && model.name.toLowerCase() === requiredName).map(model => ({ model, file })));
+            if (local.length === 1 || (!local.length && external.length === 1 && !missing.length)) {
+                const dependency = local.length ? null : external[0];
+                const dependencies = dependency && dependency.file !== entry ? [dependency.file.path] : [];
+                const text = dependency ? `${circuit.text}\n${dependency.model.text}` : circuit.text;
+                add(entry, { ...circuit, text }, 'subckt', dependencies);
+            } else {
+                const error = local.length > 1 || external.length > 1 ? 'พบโมเดล NPN ชื่อนี้มากกว่าหนึ่งรายการ' : `ยังยืนยันโมเดล NPN ที่ Q อ้างถึงไม่ได้ · ${transistor[0][1]}`;
+                add(entry, circuit, 'subckt', [], [...new Set(missing.length ? missing : [transistor[0][1]])], error);
+            }
+        }
+    }
+    return candidates;
+}
+
+const starterContexts = {
+  text: "ข้อความ SPICE หรือไฟล์ประกอบ", document: "เอกสารประกอบ", output: "ข้อมูลผลตัวอย่าง",
+  binary: "ไฟล์ที่ใช้ประกอบการอ่าน", archive: "ไฟล์ ZIP ที่ซ้อนอยู่",
+};
+const starterIncludeLabels = {missing: "ขาดไฟล์", ambiguous: "พบไฟล์ชื่อเดียวกัน", outside: "พาธอยู่นอกชุดที่เลือก"};
+let starterEntries = [], starterCandidates = [];
+let starterRead = null, starterCheck = null;
+
+function starterSelection() {
+  return starterCandidates.find(item => item.id === get("starter-model").value);
+}
+
+function starterSubmission() {
+  const selected = starterSelection();
+  const name = get("starter-name").value.trim();
+  const source = get("starter-source").value.trim();
+  if (!selected?.text || selected.error || !name || !source) return null;
+  const {kind, text} = selected;
+  const model = {kind, text, name, source, model_name: selected.name, classification: get("starter-classification").value};
+  if (kind === "subckt") {
+    const pins = [...get("starter-pin-options").querySelectorAll("select")].map(select => select.value);
+    if (!get("starter-pin-confirm").checked || !["B", "C", "E"].every(pin => pins.includes(pin))) return null;
+    model.pins = pins;
+  }
+  return model;
+}
+
+function refreshStarterButton() {
+  const button = get("starter-check-use");
+  button.disabled = Boolean(starterRead || starterCheck) || !starterSubmission();
+  button.textContent = starterCheck ? "กำลังทดสอบโมเดล" : "ทดสอบและใช้โมเดลนี้";
+}
+
+function clearStarterCheck() {
+  starterCheck?.abort();
+  starterCheck = null;
+  get("starter-check-status").textContent = "";
+  renderSetupSteps(get("starter-steps"), []);
+}
+
+function renderStarterCandidate() {
+  clearStarterCheck();
+  const selected = starterSelection();
+  const detail = get("starter-model-detail");
+  detail.textContent = selected ? [selected.path, selected.error, ...selected.missing.map(file => "ขาดไฟล์ " + file),
+    ...selected.dependencies.map(file => "ใช้ไฟล์ " + file)].filter(Boolean).join(" · ") : "";
+  get("starter-name").value = selected?.name.slice(0, 120) ?? "";
+  get("starter-pin-field").hidden = selected?.kind !== "subckt";
+  get("starter-pin-confirm").checked = false;
+  const holder = get("starter-pin-options");
+  holder.replaceChildren();
+  for (const node of selected?.nodes ?? []) {
+    const label = element("label", "ขา " + node);
+    const select = element("select");
+    select.append(new Option("เลือก B/C/E", ""), ...["B", "C", "E"].map(pin => new Option(pin, pin)));
+    label.append(select);
+    holder.append(label);
+  }
+  refreshStarterButton();
+}
+
+function renderStarterEntries() {
+  const issues = [];
+  const rows = starterEntries.map(entry => {
+    const notes = entry.kind === "text" ? starterIncludeIssues(starterEntries, entry) : [];
+    issues.push(...notes);
+    return element("li", [entry.path, starterContexts[entry.kind], ...notes.map(note =>
+      starterIncludeLabels[note.status] + " " + note.reference)].join(" · "));
+  });
+  get("starter-files-list").replaceChildren(...rows);
+  const inspection = get("starter-inspection");
+  inspection.hidden = !rows.length;
+  inspection.open = Boolean(rows.length && (!starterCandidates.length || issues.length));
+  get("starter-clear-intake").hidden = !rows.length;
+  get("starter-inspection-title").textContent = "ไฟล์และการตรวจเบื้องต้น · " + rows.length + " ไฟล์";
+  get("starter-form").hidden = !starterCandidates.length;
+  get("starter-model").replaceChildren(
+    ...(starterCandidates.length > 1 ? [new Option("เลือกชื่อโมเดล", "")] : []),
+    ...starterCandidates.map(item => new Option(item.name + " · " +
+      (item.kind === "model" ? ".MODEL NPN" : ".SUBCKT") + " · " + item.path, item.id)),
+  );
+  renderStarterCandidate();
+}
+
+async function addStarterEntries(load, source = "") {
+  if (starterRead) {
+    get("starter-intake-status").textContent = "รอให้อ่านไฟล์ชุดปัจจุบันเสร็จก่อน แล้วเพิ่มไฟล์ชุดถัดไป";
+    return false;
+  }
+  clearStarterCheck();
+  const request = new AbortController();
+  starterRead = request;
+  const message = get("starter-intake-status");
+  message.textContent = "กำลังอ่านไฟล์ในเบราว์เซอร์";
+  get("starter-clear-intake").hidden = false;
+  refreshStarterButton();
+  try {
+    const loaded = await readStarterEntries(await load(request.signal));
+    if (starterRead !== request) return false;
+    const merged = new Map(starterEntries.map(entry => [entry.path.toLowerCase(), entry]));
+    for (const entry of loaded) {
+      const existing = merged.get(entry.path.toLowerCase());
+      if (existing && (entry.path !== existing.path || entry.text !== existing.text || entry.kind !== existing.kind || entry.size !== existing.size))
+        throw new Error("พบไฟล์พาธซ้ำที่อ่านได้ต่างกัน · " + entry.path + " ล้างรายการก่อนเลือกไฟล์ชุดใหม่");
+      merged.set(entry.path.toLowerCase(), entry);
+    }
+    const entries = [...merged.values()];
+    if (entries.length > 96 || entries.reduce((total, entry) => total + entry.size, 0) > 16 * 1024 * 1024)
+      throw new Error("ชุดที่เปิดได้รวมไม่เกิน 96 ไฟล์และ 16 MiB หลังแตก ZIP");
+    const candidates = starterModels(entries);
+    starterEntries = entries;
+    starterCandidates = candidates;
+    if (source && !get("starter-source").value.trim()) get("starter-source").value = source.slice(0, 250);
+    renderStarterEntries();
+    message.textContent = starterCandidates.length ? "พบ " + starterCandidates.length + " โมเดล เลือกแล้วตรวจแหล่งที่มาก่อนทดสอบ" :
+      "ยังไม่พบ .MODEL NPN หรือ .SUBCKT สามขาในไฟล์ที่อ่านได้";
+    return true;
+  } catch (error) {
+    if (starterRead === request) message.textContent = error instanceof Error ? error.message : "อ่านไฟล์ Starter Kit ไม่สำเร็จ";
+    return false;
+  } finally {
+    if (starterRead === request) {
+      starterRead = null;
+      get("starter-clear-intake").hidden = !starterEntries.length;
+      refreshStarterButton();
+    }
+  }
+}
+
+async function readStarterUrl(url, signal) {
+  const limit = 12 * 1024 * 1024;
+  const unavailable = "อ่านไฟล์จากลิงก์นี้ไม่ได้ ใช้ลิงก์ไฟล์ปลายทางโดยตรงหรือดาวน์โหลดมาเลือกจากเครื่อง";
+  let response;
+  try {
+    response = await fetch(url, {signal, credentials: "omit", cache: "no-store", redirect: "error", referrerPolicy: "no-referrer"});
+  } catch {
+    throw new Error(unavailable);
+  }
+  if (!response.ok || !response.body || /text\/html/i.test(response.headers.get("Content-Type") ?? "")) throw new Error(unavailable);
+  const reader = response.body.getReader();
+  const chunks = [];
+  let bytes = 0;
+  try {
+    for (;;) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > limit) {
+        await reader.cancel();
+        throw new Error("ไฟล์จากลิงก์มีขนาดเกิน 12 MiB");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const filename = url.pathname.split("/").at(-1);
+  return [new File(chunks, filename || "linked-model.cir")];
+}
+
+function changeStarterModel(starter) {
+  activeStarter = starter;
+  get("starter-active-model").textContent = starter ? "โมเดลที่ใช้ในแท็บนี้ · " + starter.receipt.profile.name : "โมเดลที่ใช้ · โมเดลตั้งต้นของระบบ";
+  get("starter-reset-model").hidden = !starter;
+  get("starter-download-receipt").hidden = !starter;
+  clearDesign();
+  baseline = null;
+  reference = null;
+  restorePoint = null;
+  baselineNote("");
+  beginAuto();
+}
+
+async function checkStarterModel(event) {
+  event.preventDefault();
+  const model = starterSubmission();
+  if (!model || starterCheck || starterRead) return;
+  clearStarterCheck();
+  const request = new AbortController();
+  starterCheck = request;
+  const status = get("starter-check-status");
+  status.textContent = "กำลังตรวจด้วย ngspice ทั้ง DC, AC และ Transient";
+  refreshStarterButton();
+  try {
+    const report = await fetchJson("/api/spice/import/check", {model}, request.signal);
+    if (request !== starterCheck) return;
+    const steps = Array.isArray(report.steps) ? report.steps : [];
+    renderSetupSteps(get("starter-steps"), steps);
+    if (report.ok !== true) {
+      status.textContent = report.message || setupMessage(report.code) || "โมเดลยังไม่ผ่านชุดตรวจ ดูผลรายขั้นด้านล่าง";
+      return;
+    }
+    const profile = report.profile;
+    if (typeof report.engine_version !== "string" || !report.engine_version ||
+      steps.length !== Object.keys(setupLabels).length || !Object.keys(setupLabels).every(id =>
+      steps.filter(step => step?.id === id && step.status === "PASS").length === 1) ||
+      profile?.name !== model.name || profile?.model_name?.toLowerCase() !== model.model_name.toLowerCase() ||
+      profile.kind !== model.kind || profile.classification !== model.classification || !hexSHA256.test(profile.sha256) ||
+      JSON.stringify(profile.pins ?? []) !== JSON.stringify(model.pins ?? []))
+      throw new Error("หลักฐานจากเครื่องจำลองไม่ครบหรือต่างจากโมเดลที่เลือก");
+    if (window.isSecureContext && window.crypto?.subtle) {
+      const digest = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode(model.text));
+      if (request !== starterCheck) return;
+      const hash = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, "0")).join("");
+      if (hash !== profile.input_sha256) throw new Error("รหัส SHA-256 ของข้อมูลที่ส่งต่างจากหลักฐานที่ได้รับ");
+    }
+    const {name, model_name, kind, classification, sha256, input_sha256, pins} = profile;
+    const receipt = {ok: true, engine_version: report.engine_version,
+      profile: {name, model_name, kind, classification, source: model.source, sha256, input_sha256, pins},
+      steps: steps.map(({id, status, code, version, value_v, run_id}) => ({id, status, code, version, value_v, run_id}))};
+    changeStarterModel({model, receipt});
+    status.textContent = "ผ่านชุดตรวจและเลือกใช้ในแท็บนี้แล้ว · ngspice รุ่น " + report.engine_version;
+  } catch (error) {
+    if (request === starterCheck) status.textContent = error instanceof TypeError || error instanceof SyntaxError ?
+      "ติดต่อเครื่องจำลองไม่สำเร็จ ลองตรวจอีกครั้ง" : error.message;
+  } finally {
+    if (request === starterCheck) {
+      starterCheck = null;
+      refreshStarterButton();
+    }
+  }
+}
+
+for (const id of ["starter-files", "starter-folder"]) get(id).addEventListener("change", event => {
+  const files = [...event.target.files];
+  event.target.value = "";
+  if (files.length) addStarterEntries(() => files);
+});
+const starterDrop = get("starter-drop");
+starterDrop.addEventListener("dragover", event => {
+  event.preventDefault();
+  starterDrop.dataset.drag = "";
+});
+starterDrop.addEventListener("dragleave", event => {
+  if (!starterDrop.contains(event.relatedTarget)) delete starterDrop.dataset.drag;
+});
+starterDrop.addEventListener("drop", event => {
+  event.preventDefault();
+  delete starterDrop.dataset.drag;
+  const files = [...event.dataTransfer.files];
+  if (files.length) addStarterEntries(() => files);
+});
+get("starter-add-paste").addEventListener("click", async () => {
+  const field = get("starter-paste");
+  const value = field.value;
+  if (!value.trim()) return;
+  const file = new File([value], "pasted-" + (starterEntries.length + 1) + ".cir");
+  if (await addStarterEntries(() => [file]) && field.value === value) field.value = "";
+});
+get("starter-add-url").addEventListener("click", () => {
+  const field = get("starter-url");
+  const message = get("starter-intake-status");
+  let url;
+  try {
+    url = new URL(field.value.trim());
+  } catch {
+    message.textContent = "กรอกลิงก์ HTTPS ของไฟล์ให้ครบ";
+    return;
+  }
+  if (url.protocol !== "https:" || url.username || url.password) {
+    message.textContent = "ใช้ลิงก์ HTTPS ที่เปิดไฟล์ได้โดยไม่ต้องลงชื่อเข้าใช้";
+    return;
+  }
+  addStarterEntries(signal => readStarterUrl(url, signal), url.origin + url.pathname);
+});
+get("starter-clear-intake").addEventListener("click", () => {
+  starterRead?.abort();
+  starterRead = null;
+  starterEntries = [];
+  starterCandidates = [];
+  for (const id of ["starter-source", "starter-paste", "starter-url"]) get(id).value = "";
+  get("starter-classification").value = "provisional";
+  renderStarterEntries();
+  get("starter-intake-status").textContent = "";
+});
+get("starter-form").addEventListener("input", event => {
+  if (event.target === get("starter-model")) renderStarterCandidate();
+  else {
+    clearStarterCheck();
+    if (event.target.closest("#starter-pin-options")) get("starter-pin-confirm").checked = false;
+    refreshStarterButton();
+  }
+});
+get("starter-form").addEventListener("submit", checkStarterModel);
+get("starter-reset-model").addEventListener("click", () => {
+  clearStarterCheck();
+  changeStarterModel(null);
+  refreshStarterButton();
+});
+get("starter-download-receipt").addEventListener("click", () => {
+  if (activeStarter) chooseResultFiles([JSON.stringify(activeStarter.receipt, null, 2) + "\n"], "lab04-starter-check.json", "application/json");
+});
 
 get("setup-refresh").addEventListener("click", refreshSetup);
 get("setup-check").addEventListener("click", checkSetup);

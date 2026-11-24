@@ -19,13 +19,16 @@ from dc_bias import (
     validate_emitter_bias_inputs, validate_fixed_bias_inputs,
 )
 from spice_engine import FIELD_SPECS as SPICE_FIELDS
-from spice_engine import SpiceError, check_setup, design_search, setup_status, simulate, verified_setup_status
+from spice_engine import (
+    SpiceError, check_setup, compile_imported_model, design_search, setup_status, simulate, verified_setup_status,
+)
 
 
 _SETUP_LOCK = Lock()
 _HOSTED_SOLVER_SLOTS = BoundedSemaphore(2)
 _HOSTED_BODY_LIMIT = 16 * 1024
 _HOSTED_RESULT_LIMIT = 4 * 1024 * 1024
+_SERVER_MODEL = object()
 
 
 DEFAULT_FORM = {
@@ -521,15 +524,20 @@ def create_app() -> Flask:
             _SETUP_LOCK.release()
         return no_store(report)
 
-    def run_spice(operation, *args):
+    def run_spice(operation, *args, model=_SERVER_MODEL):
         hosted_request = application.config["LAB04_MODE"] == "hosted"
-        if hosted_request and not _HOSTED_SOLVER_SLOTS.acquire(blocking=False):
+        imported_request = model is not _SERVER_MODEL
+        limited = hosted_request or imported_request
+        if limited and not _HOSTED_SOLVER_SLOTS.acquire(blocking=False):
             response, status = no_store({"ok": False, "code": "busy", "message": "กำลังจำลองหลายรอบ กรุณาลองใหม่"}, 429)
             response.headers["Retry-After"] = "2"
             return response, status
         try:
-            result = operation(*args, **spice_config(),
-                               evidence_dir=None if hosted_request else application.config["LAB04_EVIDENCE_DIR"])
+            options = spice_config()
+            if imported_request:
+                options["imported_model"] = compile_imported_model(model)
+            result = operation(*args, **options,
+                               evidence_dir=None if limited else application.config["LAB04_EVIDENCE_DIR"])
             response, status = no_store(result)
             if hosted_request and len(response.get_data()) > _HOSTED_RESULT_LIMIT:
                 raise SpiceError("output", "The complete simulation result exceeds the hosted response limit.")
@@ -537,25 +545,37 @@ def create_app() -> Flask:
         except SpiceError as error:
             return spice_error(error)
         finally:
-            if hosted_request:
+            if limited:
                 _HOSTED_SOLVER_SLOTS.release()
+
+    @application.post("/api/spice/import/check")
+    def check_imported_spice():
+        request.max_content_length = _HOSTED_BODY_LIMIT
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or payload.keys() != {"model"}:
+            return no_store(dict(ok=False, code="request", message="เลือกโมเดลที่จะตรวจ"), 400)
+        return run_spice(check_setup, model=payload["model"])
 
     @application.post("/api/spice")
     def simulate_spice():
+        request.max_content_length = _HOSTED_BODY_LIMIT
         payload = request.get_json(silent=True)
-        if not isinstance(payload, dict) or set(payload) != {"analysis", "inputs"}:
+        expected = {"analysis", "inputs"}
+        if not isinstance(payload, dict) or payload.keys() not in (expected, expected | {"model"}):
             return jsonify(ok=False, code="request", message="ส่ง analysis และ inputs เป็น JSON",
                            fields={}), 400
-        return run_spice(simulate, payload["analysis"], payload["inputs"])
+        return run_spice(simulate, payload["analysis"], payload["inputs"], model=payload.get("model", _SERVER_MODEL))
 
     @application.post("/api/spice/design")
     def spice_design():
+        request.max_content_length = _HOSTED_BODY_LIMIT
         payload = request.get_json(silent=True)
         expected = {"inputs", "target_gain_db", "max_ic_ma"}
-        if not isinstance(payload, dict) or set(payload) != expected:
+        if not isinstance(payload, dict) or payload.keys() not in (expected, expected | {"model"}):
             return jsonify(ok=False, code="request", message="ส่งค่าตั้งและเป้าหมายการออกแบบเป็น JSON",
                            fields={}), 400
-        return run_spice(design_search, payload["inputs"], payload["target_gain_db"], payload["max_ic_ma"])
+        return run_spice(design_search, payload["inputs"], payload["target_gain_db"], payload["max_ic_ma"],
+                         model=payload.get("model", _SERVER_MODEL))
 
     @application.post("/api/sweep")
     def sweep_json():

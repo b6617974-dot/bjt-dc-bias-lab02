@@ -1,6 +1,7 @@
 """Run the Lab 04 reference circuit in ngspice and validate its ASCII results."""
 
 import cmath
+from decimal import Decimal, localcontext
 import hashlib
 import json
 import math
@@ -54,6 +55,8 @@ _MAX_POINTS = 20_000
 _MAX_RAW_BYTES = 8 * 1024 * 1024
 _MAX_PROFILE_BYTES = 64 * 1024
 _MAX_MODEL_BYTES = 1024 * 1024
+_IMPORT_MAX_TEXT = 8500
+_IMPORT_MAX_PASSIVES = 12
 _TIMEOUT = 10
 _CHECK_TIMEOUT = 20
 _CHECK_STEPS = ("version", "divider", *_PLOTS)
@@ -70,6 +73,29 @@ _DESIGN_STEPS = (1.0, 0.67, 1.5)
 _ABS_CURRENT_TOLERANCE = 1e-12
 _REL_CURRENT_TOLERANCE = 1e-3
 _SPICE_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
+_IMPORT_NAME = re.compile(r"[a-z0-9][a-z0-9_.-]{0,63}", re.ASCII)
+_IMPORT_NODE = re.compile(r"[a-z0-9][a-z0-9_]{0,63}", re.ASCII)
+_IMPORT_MODEL = re.compile(r"\.model\s+(\S+)\s+npn(?=\s|\(|$)\s*(.*)", re.IGNORECASE | re.ASCII)
+_IMPORT_ASSIGNMENT = re.compile(r"([a-z][a-z0-9]*)\s*=\s*([^\s,()=]+)", re.IGNORECASE | re.ASCII)
+_IMPORT_NUMBER = re.compile(
+    r"(?P<number>[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+))"
+    r"(?:(?P<exponent>e[+-]?[0-9]{1,3})|(?P<scale>meg|mil|[tgkmunpf]))?"
+    r"(?:ohms?|hz|deg|[vafs])?",
+    re.IGNORECASE | re.ASCII,
+)
+_IMPORT_SCALES = {
+    "t": "1e12", "g": "1e9", "meg": "1e6", "k": "1e3", "mil": "25.4e-6",
+    "m": "1e-3", "u": "1e-6", "n": "1e-9", "p": "1e-12", "f": "1e-15",
+}
+_GUMMEL_POON_PARAMETERS = frozenset("""
+    level is iss bf nf vaf ikf nkf ise ne br nr var ikr isc nc rb irb rbm re rc
+    cje vje mje tf xtf vtf itf ptf cjc vjc mjc xcjc tr cjs vjs mjs xtb eg xti
+    kf af fc tnom tlev tlevc tre1 tre2 trc1 trc2 trb1 trb2 trbm1 trbm2 tbf1 tbf2
+    tbr1 tbr2 tikf1 tikf2 tikr1 tikr2 tirb1 tirb2 tnc1 tnc2 tne1 tne2 tnf1 tnf2
+    tnr1 tnr2 tvaf1 tvaf2 tvar1 tvar2 ctc cte
+""".split())
+_BJT_PARAMETER_ALIASES = {"va": "vaf", "vb": "var", "pe": "vje", "me": "mje",
+                          "pc": "vjc", "mc": "mjc", "ps": "vjs", "ms": "mjs", "tref": "tnom"}
 _NGSPICE_VERSION = re.compile(r"[A-Za-z0-9_.+-]{1,64}")
 _FATAL_LOG = re.compile(
     r"(?im)^\s*(?:error(?:\s|:)|fatal(?:\s|:)|timestep too small)|\bsimulation(?:s)? aborted\b"
@@ -177,6 +203,7 @@ def _load_profile(profile_path):
     except UnicodeDecodeError as exc:
         raise _profile_error("model_format", "The model file must be ASCII SPICE text.") from exc
     _validate_model(profile, model)
+    profile.pop("input_sha256", None)
     return profile, model_bytes
 
 
@@ -226,6 +253,180 @@ def _validate_model(profile, model):
         raise _profile_error("model_pins", "The subcircuit profile must map B, C and E exactly once.")
     if inside or declarations != 1:
         raise _profile_error("model_declaration", "The named NPN model or subcircuit must be declared exactly once.")
+
+
+def _import_error(reason, message):
+    return SpiceError("input", message, reason=reason)
+
+
+def _import_statements(text):
+    if not isinstance(text, str) or not text.strip() or len(text) > _IMPORT_MAX_TEXT:
+        raise _import_error("model_format", "Select a non-empty SPICE definition up to 8500 characters.")
+    if re.search(r"[^\x09\x0a\x0d\x20-\x7e]", text):
+        raise _import_error("model_format", "The selected SPICE definition must use ASCII text.")
+
+    statements = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith(("*", "$", "//")):
+            continue
+        line = re.split(r"\s+(?:\$|//)", line, maxsplit=1)[0].rstrip()
+        if line.startswith("+"):
+            if not statements or statements[-1].split(maxsplit=1)[0].lower() != ".model":
+                raise _import_error("model_declaration", "Use continuation lines only for a .MODEL declaration.")
+            statements[-1] += " " + line[1:].strip()
+        else:
+            statements.append(line)
+            if len(statements) > _IMPORT_MAX_PASSIVES + 4:
+                raise _import_error("model_declaration", "The selected definition has too many SPICE statements.")
+    return statements
+
+
+def _import_numeric(token):
+    match = _IMPORT_NUMBER.fullmatch(token) if len(token) <= 36 else None
+    if not match:
+        raise _import_error("model_parameter", "Use finite numeric values with SPICE suffixes only.")
+    with localcontext() as context:
+        context.prec = 64
+        value = Decimal(match['number'] + (match['exponent'] or ""))
+        if match["scale"]:
+            value *= Decimal(_IMPORT_SCALES[match["scale"].lower()])
+    if value and not Decimal("1e-40") <= abs(value) <= Decimal("1e30"):
+        raise _import_error("model_parameter", "Numeric model values are outside the supported magnitude range.")
+    return value
+
+
+def _import_number_text(value):
+    with localcontext() as context:
+        context.prec = 64
+        return format(value.normalize(), "e") if value else "0"
+
+
+def _import_npn(statement):
+    match = _IMPORT_MODEL.fullmatch(statement)
+    if not match or not _IMPORT_NAME.fullmatch(match[1].lower()):
+        raise _import_error("model_declaration", "Use a named .MODEL declaration of type NPN.")
+    name, body = match[1].lower(), match[2].strip()
+    if body.startswith("(") and body.endswith(")"):
+        body = body[1:-1].strip()
+    parameters = {}
+    while body:
+        parameter = _IMPORT_ASSIGNMENT.match(body)
+        if not parameter:
+            raise _import_error("model_parameter", "Use named numeric parameters such as BF=100.")
+        key, token = parameter[1].lower(), parameter[2]
+        key = _BJT_PARAMETER_ALIASES.get(key, key)
+        if key not in _GUMMEL_POON_PARAMETERS or key in parameters:
+            raise _import_error("model_parameter", "Use supported Gummel–Poon parameters and specify each once.")
+        value = _import_numeric(token)
+        if key == "level" and value != 1:
+            raise _import_error("model_parameter", "Use the classic NPN model, LEVEL=1.")
+        parameters[key] = _import_number_text(value)
+        remainder = body[parameter.end():]
+        if remainder and not (remainder[0].isspace() or remainder[0] == ","):
+            raise _import_error("model_parameter", "Separate model parameters with a space or comma.")
+        body = remainder.strip()
+        if body.startswith(","):
+            body = body[1:].lstrip()
+            if not body:
+                raise _import_error("model_parameter", "Remove the trailing comma from the model parameters.")
+    if not parameters:
+        return name, f".model {name} npn"
+    assignments = "\n+ ".join(f"{key}={parameters[key]}" for key in sorted(parameters))
+    return name, f".model {name} npn (\n+ {assignments})"
+
+
+def _import_subcircuit(statements, selected):
+    commands = [line.split(maxsplit=1)[0].lower() for line in statements]
+    if any(commands.count(command) != 1 for command in (".subckt", ".ends", ".model")):
+        raise _import_error("model_declaration", "Select one complete .SUBCKT with one companion NPN .MODEL.")
+    first, last = commands.index(".subckt"), commands.index(".ends")
+    header = statements[first].lower().split()
+    footer = statements[last].lower().split()
+    if first >= last or len(header) != 5 or header[1] != selected or footer not in ([".ends"], [".ends", selected]):
+        raise _import_error("model_declaration", "Match the selected .SUBCKT name and give exactly three terminals.")
+    pins = header[2:]
+    if len(set(pins)) != 3:
+        raise _import_error("model_pins", "The three subcircuit terminals must be distinct.")
+    model_at = commands.index(".model")
+    model_name, model_line = _import_npn(statements[model_at])
+    if any(index != model_at for index in (*range(first), *range(last + 1, len(statements)))):
+        raise _import_error("model_declaration", "Only the selected subcircuit and its companion .MODEL are allowed.")
+
+    elements = []
+    device_names = set()
+    transistor_count = 0
+    for index in range(first + 1, last):
+        if index == model_at:
+            continue
+        terms = statements[index].lower().split()
+        device, device_type = terms[0], terms[0][0]
+        if not re.fullmatch(r"[qrc][a-z0-9_]{1,63}", device) or device in device_names:
+            raise _import_error("model_declaration", "Use unique Q, R or C device names inside the subcircuit.")
+        device_names.add(device)
+        if device_type == "q" and len(terms) == 5 and terms[-1] == model_name:
+            transistor_count += 1
+            nodes, value = terms[1:4], model_name
+        elif device_type in "rc" and len(terms) == 4:
+            nodes, number = terms[1:3], _import_numeric(terms[-1])
+            lower, upper = (Decimal("1e-6"), Decimal("1e12")) if device_type == "r" else (Decimal("1e-18"), Decimal("1"))
+            if not lower <= number <= upper:
+                raise _import_error("model_parameter", "Use positive, bounded resistance and capacitance values.")
+            value = _import_number_text(number)
+        else:
+            raise _import_error("model_declaration", "Use one NPN Q and simple two-terminal R or C devices.")
+        if len(set(nodes)) != len(nodes) or any(
+            node in ("0", "gnd") or not _IMPORT_NODE.fullmatch(node) for node in nodes
+        ):
+            raise _import_error("model_pins", "Use distinct, named subcircuit nodes without a global ground connection.")
+        elements.append((device, nodes, value))
+    ports_used = {node for _, nodes, _ in elements for node in nodes}
+    if transistor_count != 1 or len(elements) > _IMPORT_MAX_PASSIVES + 1 or not set(pins) <= ports_used or any(
+        pin in ("0", "gnd") or not _IMPORT_NODE.fullmatch(pin) for pin in pins
+    ):
+        raise _import_error("model_pins", "Use one NPN, three connected external pins and at most 12 R/C devices.")
+    output = [" ".join(header)]
+    output.extend(" ".join((device, *nodes, value)) for device, nodes, value in elements)
+    output.extend((model_line, f".ends {selected}"))
+    return "\n".join(output)
+
+
+def compile_imported_model(model):
+    """Compile a single browser-provided NPN definition to canonical SPICE bytes."""
+    required = {"text", "name", "source", "classification", "model_name", "kind"}
+    kind = model.get("kind") if isinstance(model, dict) else None
+    if kind not in ("model", "subckt") or set(model) != (required | {"pins"} if kind == "subckt" else required):
+        raise _import_error("model_format", "Send the selected definition and its model details only.")
+    details = {}
+    for key, limit in (("name", 120), ("source", 250), ("model_name", 64)):
+        value = model[key]
+        if not isinstance(value, str) or not value.strip() or len(value) > limit or re.search(r"[\x00-\x1f\x7f]", value):
+            raise _import_error("model_format", "Use a non-empty name and source within the field limits.")
+        details[key] = value.strip()
+    selected = details["model_name"].lower()
+    classification = model["classification"]
+    if not details["model_name"].isascii() or not _IMPORT_NAME.fullmatch(selected) or classification not in ("provisional", "instructor"):
+        raise _import_error("model_format", "Check the model identifier and the source classification.")
+
+    statements = _import_statements(model["text"])
+    if kind == "model":
+        if len(statements) != 1:
+            raise _import_error("model_declaration", "Select exactly one NPN .MODEL definition.")
+        name, body = _import_npn(statements[0])
+        if name != selected:
+            raise _import_error("model_declaration", "The selected model name does not match the NPN declaration.")
+    else:
+        pins = model["pins"]
+        if not isinstance(pins, list) or len(pins) != 3 or any(type(pin) is not str for pin in pins) or set(pins) != set("BCE"):
+            raise _import_error("model_pins", "Map B, C and E exactly once in the documented pin order.")
+        details["pins"] = pins.copy()
+        body = _import_subcircuit(statements, selected)
+
+    canonical = (body + "\n").encode("ascii")
+    sha256 = hashlib.sha256(canonical).hexdigest()
+    return dict(details, model_name=selected, kind=kind, classification=classification,
+                id="imported-" + sha256[:16], sha256=sha256,
+                input_sha256=hashlib.sha256(model["text"].encode("ascii")).hexdigest()), canonical
 
 
 def _tran_stop(freq):
@@ -508,6 +709,8 @@ def _profile_metadata(profile):
     fields = {key: profile[key] for key in ("name", "classification", "kind", "model_name")}
     if profile["kind"] == "subckt":
         fields["pins"] = profile["pins"].copy()
+    if "input_sha256" in profile:
+        fields["input_sha256"] = profile["input_sha256"]
     return dict(fields, sha256=profile["sha256"].lower())
 
 
@@ -527,7 +730,7 @@ def setup_status(*, profile_path=None, executable=None):
     return {"engine": engine, "profile": model}
 
 
-def check_setup(*, profile_path=None, executable=None, evidence_dir=None):
+def check_setup(*, profile_path=None, executable=None, evidence_dir=None, imported_model=None):
     """Check the executable and a fixed reference circuit under one deadline."""
     deadline = monotonic() + _CHECK_TIMEOUT
     steps = {step: {"id": step, "status": "NOT RUN"} for step in _CHECK_STEPS}
@@ -560,7 +763,7 @@ def check_setup(*, profile_path=None, executable=None, evidence_dir=None):
         return report
 
     try:
-        profile, model_bytes = _load_profile(profile_path)
+        profile, model_bytes = _load_profile(profile_path) if imported_model is None else imported_model
     except SpiceError as error:
         report["profile"] = {"status": "unavailable", "code": error.reason}
         for stage in _PLOTS:
@@ -631,10 +834,10 @@ def verified_setup_status(path, active_profile, *, executable=None):
     return {"source": "build", "engine_version": version, "steps": safe_steps}
 
 
-def simulate(analysis, inputs, *, profile_path=None, executable=None, evidence_dir=None):
+def simulate(analysis, inputs, *, profile_path=None, executable=None, evidence_dir=None, imported_model=None):
     """Validate form values, run the selected model, and return one result in SI."""
     values = _parse_inputs(analysis, inputs)
-    profile, model_bytes = _load_profile(profile_path)
+    profile, model_bytes = _load_profile(profile_path) if imported_model is None else imported_model
     return _run_simulation(analysis, values, profile, model_bytes, _solver_path(executable), evidence_dir=evidence_dir)
 
 
@@ -671,13 +874,11 @@ def _run_simulation(analysis, values, profile, model_bytes, program, *, evidence
     except OSError as exc:
         raise SpiceError("output", "The server could not read or save the simulation files.") from exc
 
-    provenance = {key: profile[key] for key in ("id", "name", "classification", "model_name", "source", "kind")}
-    if profile["kind"] == "subckt":
-        provenance["pins"] = profile["pins"].copy()
+    provenance = {"id": profile["id"], "source": profile["source"], **_profile_metadata(profile)}
     return {
         "ok": True, "analysis": analysis, "run_id": run_id, "inputs_si": values,
         "provenance": {
-            **provenance, "sha256": profile["sha256"].lower(), "ngspice_version": version,
+            **provenance, "ngspice_version": version,
             "netlist_sha256": hashlib.sha256(deck).hexdigest(),
         },
         "units": _UNITS[analysis].copy(), "data": data, "warnings": warnings,
@@ -706,7 +907,8 @@ def _design_points(values):
     return [(rc, re) for rc in choices["rc"] for re in choices["re"]]
 
 
-def design_search(inputs, target_gain_db, max_ic_ma, *, profile_path=None, executable=None, evidence_dir=None):
+def design_search(inputs, target_gain_db, max_ic_ma, *, profile_path=None, executable=None, evidence_dir=None,
+                  imported_model=None):
     """Rank a bounded set of RC and RE pairs using the actual .op and .ac measurements."""
     values = _parse_inputs("dc", inputs)
     if inputs.keys() != values.keys():
@@ -715,7 +917,7 @@ def design_search(inputs, target_gain_db, max_ic_ma, *, profile_path=None, execu
     current_cap = _design_target(max_ic_ma, "max_ic_ma", positive=True)
     points = _design_points(values)
     deadline = monotonic() + _TIMEOUT
-    profile, model_bytes = _load_profile(profile_path)
+    profile, model_bytes = _load_profile(profile_path) if imported_model is None else imported_model
     program = _solver_path(executable)
     version = None
 

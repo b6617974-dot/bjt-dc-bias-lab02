@@ -23,6 +23,7 @@ from spice_engine import (
     _parse_inputs,
     _read_raw,
     check_setup,
+    compile_imported_model,
     design_search,
     setup_status,
     simulate,
@@ -32,6 +33,14 @@ from spice_engine import (
 
 _DEFAULTS = {key: default for key, (_, _, default) in FIELD_SPECS.items()}
 _MODEL = ".MODEL LABTEST NPN (IS=1e-14 BF=100 VAF=75 CJE=10p CJC=4p TF=.3n)\n"
+_IMPORTED_WRAPPER = """* Documented pin order: E C B
+.subckt LABWRAP emit coll base
+Rbase base internal 10
+Cfeedback internal coll 2p
+Qcore coll internal emit LABTEST
+.model LABTEST NPN (IS=1e-14 BF=100 VAF=75 CJE=10p CJC=4p TF=.3n)
+.ends LABWRAP
+"""
 _EXECUTABLE = os.environ.get("LAB04_NGSPICE") or shutil.which("ngspice")
 _RAW_DC = """Title: Test ASCII Raw
 Plotname: Operating Point
@@ -75,6 +84,74 @@ def _write_profile(directory, model=_MODEL, *, kind="model", name="LABTEST", pin
     path = directory / "profile.json"
     path.write_text(json.dumps(profile), encoding="utf-8")
     return path
+
+
+def _model_import(**changes):
+    return {"kind": "model", "text": _MODEL, "model_name": "LABTEST", "name": "Example model",
+            "source": "Verification fixture", "classification": "instructor", **changes}
+
+
+class ImportedModelTests(unittest.TestCase):
+    def test_canonical_model_consumes_only_numeric_statements_and_keeps_input_identity(self):
+        first = "* Fixture\r\n.MODEL Example NPN ( BF=100,  IS=1e-12 $ comment\r\n+ Va=75 CJE=1nF)\r\n"
+        second = ".model example npn vaf=75 cje=1e-9 is=1p bf=1e2 // fixture"
+        a, canonical_a = compile_imported_model(_model_import(model_name="Example", text=first))
+        b, canonical_b = compile_imported_model(_model_import(model_name="example", text=second))
+        self.assertEqual(a["model_name"], "example")
+        self.assertEqual(canonical_a, canonical_b)
+        self.assertEqual(a["sha256"], b["sha256"])
+        self.assertEqual(a["sha256"], hashlib.sha256(canonical_a).hexdigest())
+        self.assertEqual(a["input_sha256"], hashlib.sha256(first.encode("ascii")).hexdigest())
+        self.assertNotEqual(a["input_sha256"], b["input_sha256"])
+        self.assertNotIn(b"comment", canonical_a)
+        self.assertEqual(compile_imported_model(_model_import(text=canonical_a.decode("ascii"), model_name="example"))[1],
+                         canonical_a)
+
+    def test_rejects_invalid_import_envelopes_and_unconsumed_noncomment_text(self):
+        invalid = (
+            None, [], _model_import(extra_field=True), _model_import(text="*" * 8501),
+            _model_import(name="n" * 121), _model_import(source="s" * 251),
+            _model_import(model_name="Different"), _model_import(classification="unknown"),
+            _model_import(text=_MODEL + ".temp 27\n"),
+            _model_import(text=_MODEL + ".include another.lib\n"),
+            _model_import(text=_MODEL + ".control\n.endc\n"),
+            _model_import(text=_MODEL + ".model duplicate NPN(BF=100)\n"),
+            _model_import(text=".model LABTEST NPN(BF={value})"),
+            _model_import(text=".model LABTEST NPN(BF=-Infinity)"),
+            _model_import(text=".model LABTEST NPN(BF=1e999)"),
+            _model_import(text=".model LABTEST NPN(BF=100 XX=1)"),
+            _model_import(text=".model LABTEST NPN(BF=100 VAF=50 VA=60)"),
+            _model_import(text=".model LABTEST NPN(BF=100 LEVEL=4)"),
+            _model_import(text=".model LABTEST NPN(BF=100))"),
+            _model_import(text=".model LABTEST PNP(BF=100)"),
+            _model_import(text=".model LABTEST NPN(BF=100)\u200b"),
+        )
+        for index, model in enumerate(invalid):
+            with self.subTest(case=index), self.assertRaises(SpiceError) as raised:
+                compile_imported_model(model)
+            self.assertEqual(raised.exception.code, "input")
+            self.assertNotEqual(raised.exception.reason, "input")
+
+    def test_subcircuit_retains_documented_pin_order_and_rejects_unsupported_topologies(self):
+        parameters = _model_import(kind="subckt", text=_IMPORTED_WRAPPER, model_name="LABWRAP", pins=["E", "C", "B"])
+        profile, canonical = compile_imported_model(parameters)
+        self.assertEqual(profile["pins"], ["E", "C", "B"])
+        self.assertIn(b"qcore coll internal emit labtest", canonical)
+        self.assertNotIn(b"Documented pin", canonical)
+        for model in (
+            dict(parameters, pins=["E", "C", "C"]),
+            dict(parameters, text=_IMPORTED_WRAPPER.replace("emit coll base", "emit coll coll")),
+            dict(parameters, text=_IMPORTED_WRAPPER.replace("emit coll base", "emit coll base 0")),
+            dict(parameters, text=_IMPORTED_WRAPPER.replace("Rbase base internal 10", "Rbase base 0 10")),
+            dict(parameters, text=_IMPORTED_WRAPPER.replace("Rbase base internal 10", "Vdev base internal 10")),
+            dict(parameters, text=_IMPORTED_WRAPPER.replace("Rbase base internal 10", "Rbase base internal -5")),
+            dict(parameters, text=_IMPORTED_WRAPPER.replace("Rbase base internal 10", "Rbase base internal {foo}")),
+            dict(parameters, text=_IMPORTED_WRAPPER.replace("Qcore coll internal emit LABTEST", "Qcore coll internal emit another")),
+            dict(parameters, text=_IMPORTED_WRAPPER.replace(".ends LABWRAP", ".ends Different")),
+        ):
+            with self.subTest(model=model), self.assertRaises(SpiceError) as raised:
+                compile_imported_model(model)
+            self.assertEqual(raised.exception.code, "input")
 
 
 class SpiceValidationTests(unittest.TestCase):
@@ -340,6 +417,37 @@ class DesignSearchTests(unittest.TestCase):
 
 @unittest.skipUnless(_EXECUTABLE, "Set LAB04_NGSPICE or add ngspice to PATH for real solver tests.")
 class RealSpiceTests(unittest.TestCase):
+    def test_imported_model_drives_check_simulation_and_design_without_changing_default(self):
+        imported = compile_imported_model(_model_import(text=_MODEL.replace("BF=100", "BF=200")))
+        with tempfile.TemporaryDirectory() as location:
+            profile_path = _write_profile(Path(location))
+            arguments = {"profile_path": profile_path, "executable": _EXECUTABLE}
+            default = simulate("dc", _DEFAULTS, **arguments)
+            checked = check_setup(**arguments, imported_model=imported)
+            self.assertTrue(checked["ok"])
+            self.assertEqual(checked["profile"]["sha256"], imported[0]["sha256"])
+            self.assertEqual(checked["profile"]["input_sha256"], imported[0]["input_sha256"])
+            custom = simulate("dc", _DEFAULTS, **arguments, imported_model=imported)
+            self.assertNotEqual(default["data"]["point"]["ic_a"], custom["data"]["point"]["ic_a"])
+            self.assertEqual(custom["provenance"]["input_sha256"], imported[0]["input_sha256"])
+            self.assertEqual(simulate("dc", _DEFAULTS, **arguments)["data"], default["data"])
+            self.assertNotIn("input_sha256", default["provenance"])
+            design = design_search({k: v for k, v in _DEFAULTS.items() if k not in ("amp", "freq")},
+                                   0, 10, **arguments, imported_model=imported)
+            self.assertEqual(design["model_sha256"], imported[0]["sha256"])
+            self.assertTrue(design["candidates"])
+
+    def test_imported_three_pin_wrapper_runs_all_analyses(self):
+        wrapped = compile_imported_model(_model_import(kind="subckt", text=_IMPORTED_WRAPPER,
+                                                        model_name="LABWRAP", pins=["E", "C", "B"]))
+        for analysis in ("dc", "ac", "tran"):
+            with self.subTest(analysis=analysis):
+                result = simulate(analysis, _DEFAULTS, executable=_EXECUTABLE, imported_model=wrapped)
+                self.assertTrue(result["ok"])
+                self.assertEqual(result["analysis"], analysis)
+                self.assertEqual(result["provenance"]["pins"], ["E", "C", "B"])
+                self.assertEqual(result["provenance"]["sha256"], wrapped[0]["sha256"])
+
     def test_setup_uses_real_divider_and_default_ce_and_preserves_no_model_state(self):
         with tempfile.TemporaryDirectory() as location:
             directory = Path(location)

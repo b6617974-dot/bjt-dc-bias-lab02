@@ -472,6 +472,39 @@ class Lab04RouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.get_json()["code"], "request")
 
+    def test_hosted_import_and_simulation_bind_model_to_one_request(self):
+        self.app.config.update(LAB04_MODE="hosted", LAB04_EVIDENCE_DIR="existing-evidence")
+        model = {"name": "Teacher example", "source": "Lab 04 model fixture", "classification": "instructor",
+                 "kind": "model", "model_name": "CourseQ", "text": ".model CourseQ NPN(IS=1e-14 BF=120)"}
+        body = {"analysis": "dc", "inputs": self.inputs}
+        other_browser = self.app.test_client()
+        with patch("app.check_setup", return_value={"ok": True}) as check, \
+                patch("app.simulate", return_value={"ok": True}) as simulate:
+            checked = self.client.post("/api/spice/import/check", json={"model": model})
+            self.assertEqual(checked.status_code, 200)
+            self.assertTrue(checked.cache_control.no_store)
+            self.assertEqual(self.client.post("/api/spice", json={**body, "model": model}).status_code, 200)
+            self.assertEqual(other_browser.post("/api/spice", json=body).status_code, 200)
+        checked_profile = check.call_args.kwargs["imported_model"]
+        self.assertEqual(checked_profile, simulate.call_args_list[0].kwargs["imported_model"])
+        self.assertNotIn("imported_model", simulate.call_args_list[1].kwargs)
+        self.assertIsNone(check.call_args.kwargs["evidence_dir"])
+        self.assertEqual(self.app.config["LAB04_SPICE_PROFILE"], "profile.json")
+
+    def test_unusable_import_fails_before_solver_without_falling_back(self):
+        request_model = {"name": "Teacher example", "source": "Lab 04 fixture", "classification": "instructor",
+                         "kind": "model", "model_name": "CourseQ", "text": ".model CourseQ NPN(BF=120)\n.op"}
+        body = {"analysis": "dc", "inputs": self.inputs}
+        with patch("app.simulate") as simulate, patch("app.check_setup") as check:
+            for model in (None, request_model, {**request_model, "profile_path": "external.json"}):
+                with self.subTest(model=model):
+                    self.assertEqual(self.client.post("/api/spice", json={**body, "model": model}).status_code, 422)
+                    self.assertEqual(self.client.post("/api/spice/import/check", json={"model": model}).status_code, 422)
+            large = self.client.post("/api/spice/import/check", json={"model": {"text": "x" * 17000}})
+            self.assertEqual(large.status_code, 413)
+        simulate.assert_not_called()
+        check.assert_not_called()
+
     def test_design_route_bounds_request_to_server_configured_search(self):
         request = {"inputs": self.inputs, "target_gain_db": 5, "max_ic_ma": 1.5}
         result = {"ok": True, "evaluated": 9, "total": 9, "candidates": []}

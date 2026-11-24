@@ -79,9 +79,70 @@
           <p id="setup-check-message" class="muted" role="status"></p>
           <p id="setup-report-source" class="muted" hidden>ผลตรวจตอนสร้างรุ่น</p>
           <ul id="setup-steps" class="setup-steps" aria-label="ผลตรวจรายขั้น" hidden></ul>
-          <p id="setup-hosted-note" class="muted" hidden>ผู้ดูแลรุ่นออนไลน์เป็นผู้เลือก ngspice และโมเดลของระบบ เปิดแท็บ DC, AC หรือ Transient เพื่อทดลองได้จากเบราว์เซอร์</p>
+          <p id="setup-hosted-note" class="muted" hidden>รุ่นออนไลน์ใช้ ngspice ของเซิร์ฟเวอร์ คุณเลือกใช้โมเดลตั้งต้นหรือนำเข้าโมเดลที่ต้องการสำหรับแท็บนี้ได้</p>
         </div>
-        <div id="setup-local" class="setup-local" hidden>
+        <div class="setup-tools">
+          <section class="starter-intake" aria-labelledby="starter-heading">
+            <h2 id="starter-heading">เปิด Starter Kit</h2>
+            <div class="starter-active">
+              <p id="starter-active-model" role="status">โมเดลที่ใช้ · โมเดลตั้งต้นของระบบ</p>
+              <button type="button" id="starter-reset-model" hidden>กลับไปใช้โมเดลตั้งต้น</button>
+            </div>
+            <div id="starter-drop">
+              <p>ลากไฟล์ลงที่นี่ หรือเลือกไฟล์โมเดลและไฟล์ประกอบพร้อมกัน</p>
+              <div class="starter-pickers">
+                <label class="starter-picker" for="starter-files"><span>เลือกไฟล์หรือ ZIP</span><input type="file" id="starter-files" multiple></label>
+                <label class="starter-picker" for="starter-folder"><span>เลือกโฟลเดอร์</span><input type="file" id="starter-folder" webkitdirectory multiple></label>
+              </div>
+            </div>
+            <details class="starter-source">
+              <summary>วางข้อความหรือใช้ลิงก์ไฟล์โดยตรง</summary>
+              <div class="detail-body">
+                <label for="starter-paste">ข้อความ SPICE</label>
+                <textarea id="starter-paste" rows="4" spellcheck="false" maxlength="65536"></textarea>
+                <button type="button" id="starter-add-paste">เพิ่มข้อความ</button>
+                <label for="starter-url">ลิงก์ HTTPS ของไฟล์โมเดลหรือ ZIP</label>
+                <input type="url" id="starter-url" maxlength="2000" placeholder="https://…" inputmode="url">
+                <button type="button" id="starter-add-url">อ่านไฟล์จากลิงก์</button>
+                <p class="muted">ใช้ลิงก์ที่เบราว์เซอร์อ่านไฟล์ได้โดยตรง หากเว็บไซต์ต้นทางปิดการเข้าถึง ให้ดาวน์โหลดไฟล์แล้วเลือกจากเครื่อง</p>
+              </div>
+            </details>
+            <p id="starter-intake-status" class="muted" role="status"></p>
+            <details id="starter-inspection" hidden>
+              <summary id="starter-inspection-title">ไฟล์และการตรวจเบื้องต้น</summary>
+              <div class="detail-body"><ul id="starter-files-list" class="starter-files-list"></ul></div>
+            </details>
+            <form id="starter-form" hidden>
+              <div class="records-form">
+                <label>โมเดลที่จะทดสอบ <select id="starter-model" required></select></label>
+                <label>ชื่อที่แสดง <input type="text" id="starter-name" maxlength="120" required></label>
+                <label>แหล่งที่มา <input type="text" id="starter-source" maxlength="250" required placeholder="ลิงก์ต้นทางหรือชื่อชุดผู้สอน"></label>
+                <label>ประเภทโปรไฟล์
+                  <select id="starter-classification">
+                    <option value="provisional">ชั่วคราว / สาธิต</option>
+                    <option value="instructor">ไฟล์ที่ได้รับจากผู้สอน</option>
+                  </select>
+                </label>
+              </div>
+              <p id="starter-model-detail" class="muted"></p>
+              <fieldset id="starter-pin-field" hidden>
+                <legend>จับคู่ขา .SUBCKT ตามลำดับในไฟล์</legend>
+                <div class="records-form" id="starter-pin-options"></div>
+                <label class="live-edit"><input id="starter-pin-confirm" type="checkbox"> ยืนยันผัง B, C และ E ตามต้นทาง</label>
+              </fieldset>
+              <p class="muted">ระบบส่งเฉพาะนิยามโมเดลที่เลือกไปทดสอบด้วย ngspice และใช้เฉพาะในแท็บนี้หลังผ่านชุดตรวจ</p>
+              <button type="submit" id="starter-check-use" class="setup-primary" disabled>ทดสอบและใช้โมเดลนี้</button>
+            </form>
+            <p id="starter-check-status" class="muted" role="status"></p>
+            <ul id="starter-steps" class="setup-steps" aria-label="ผลตรวจ Starter Kit" hidden></ul>
+            <div class="group">
+              <button type="button" id="starter-download-receipt" hidden>ดาวน์โหลดหลักฐานโมเดลที่ใช้</button>
+              <button type="button" id="starter-clear-intake" hidden>ล้างรายการไฟล์</button>
+            </div>
+          </section>
+          <details id="setup-local" hidden>
+            <summary>ติดตั้งเองและสร้าง profile.json</summary>
+            <div class="setup-local">
           <div>
             <h2>1. ติดตั้งบนเครื่องที่รัน Workbench</h2>
             <p>ดาวน์โหลด ngspice จาก <a href="https://ngspice.sourceforge.io/download.html">เว็บไซต์ของผู้พัฒนา</a> บน Windows ใช้รุ่น portable แล้วแตกไฟล์ไว้ในโฟลเดอร์ที่เข้าถึงได้ บน macOS ใช้ Homebrew และบน Ubuntu/Debian ใช้ตัวจัดการแพ็กเกจของระบบ</p>
@@ -150,6 +211,8 @@ export LAB04_SPICE_PROFILE="/path/to/models/profile.json"
             <p id="setup-copy-message" class="muted" role="status"></p>
             <p class="muted">ถ้าเครื่องนี้ติดตั้งไม่สำเร็จ ใช้รุ่น portable บน Windows หรือเปิดจากเครื่องแลปที่ตั้งค่าครบ ระหว่างเตรียมเครื่องใช้ <a href="{{ url_for('index') }}">เครื่องคำนวณมือ Lab 03</a> ได้</p>
           </div>
+            </div>
+          </details>
         </div>
       </div>
     </details>
